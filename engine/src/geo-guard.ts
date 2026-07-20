@@ -1,9 +1,65 @@
 /**
- * US IP guard (production on GitHub Actions) or calm staging mode (local / Pakistan).
+ * US IP guard (production on GitHub Actions) or calm staging mode (local).
+ * Uses multiple free geo providers so one rate-limit does not break runs.
  */
 
 import { getDeploymentMode, getEnv, getStagingLabel, isStagingMode, loadConfig } from './config.js';
 import type { GeoGuardResult } from './types.js';
+
+type GeoHit = { country: string | null; ip: string | null };
+
+async function lookupIpwho(): Promise<GeoHit | null> {
+  const res = await fetch('https://ipwho.is/', {
+    headers: { Accept: 'application/json', 'User-Agent': 'beacon-monitor/1.0' },
+  });
+  if (!res.ok) return null;
+  const text = await res.text();
+  if (/rate.?limit/i.test(text) || text.trim() === 'local_rate_limited') return null;
+  const data = JSON.parse(text) as {
+    success?: boolean;
+    country_code?: string;
+    ip?: string;
+  };
+  if (data.success === false) return null;
+  return { country: data.country_code || null, ip: data.ip || null };
+}
+
+async function lookupIpapi(url: string): Promise<GeoHit | null> {
+  const res = await fetch(url, {
+    headers: { Accept: 'application/json', 'User-Agent': 'beacon-monitor/1.0' },
+  });
+  const text = await res.text();
+  // Free tier often returns plain text when over quota
+  if (!res.ok || /rate.?limit/i.test(text) || text.trim() === 'local_rate_limited') {
+    return null;
+  }
+  const data = JSON.parse(text) as {
+    error?: boolean;
+    reason?: string;
+    country_code?: string;
+    country?: string;
+    ip?: string;
+  };
+  if (data.error || /rate/i.test(data.reason || '')) return null;
+  return {
+    country: data.country_code || data.country || null,
+    ip: data.ip || null,
+  };
+}
+
+async function resolveGeo(primaryUrl: string): Promise<GeoHit> {
+  // Prefer ipwho.is first — ipapi.co free tier rate-limits quickly and returns "local_rate_limited"
+  const fromWho = await lookupIpwho().catch(() => null);
+  if (fromWho?.country) return fromWho;
+
+  const fromApi = await lookupIpapi(primaryUrl).catch(() => null);
+  if (fromApi?.country) return fromApi;
+
+  const fromApiFallback = await lookupIpapi('https://ipapi.co/json/').catch(() => null);
+  if (fromApiFallback?.country) return fromApiFallback;
+
+  throw new Error('All geo lookup providers failed or rate-limited');
+}
 
 export async function runGeoGuard(): Promise<GeoGuardResult> {
   const config = loadConfig();
@@ -15,32 +71,9 @@ export async function runGeoGuard(): Promise<GeoGuardResult> {
   let ip: string | null = null;
 
   try {
-    const res = await fetch(config.geoCheckUrl, {
-      headers: {
-        'User-Agent': 'beacon-monitor/1.0',
-        Accept: 'application/json',
-      },
-    });
-    if (!res.ok) {
-      const fallback = await fetch('https://ipwho.is/');
-      if (!fallback.ok) {
-        throw new Error(`Geo lookup HTTP ${res.status}`);
-      }
-      const data = (await fallback.json()) as {
-        country_code?: string;
-        ip?: string;
-      };
-      country = data.country_code || null;
-      ip = data.ip || null;
-    } else {
-      const data = (await res.json()) as {
-        country_code?: string;
-        country?: string;
-        ip?: string;
-      };
-      country = data.country_code || data.country || null;
-      ip = data.ip || null;
-    }
+    const hit = await resolveGeo(config.geoCheckUrl);
+    country = hit.country;
+    ip = hit.ip;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (isStagingMode()) {
@@ -84,7 +117,6 @@ export async function runGeoGuard(): Promise<GeoGuardResult> {
     };
   }
 
-  // Production mode (GitHub Actions): must be US + FORCE_PRODUCTION
   if (!isUs) {
     const warning =
       `US IP GUARD BLOCKED THIS RUN — machine is in "${country || 'unknown'}", not ${config.requiredCountry}. ` +

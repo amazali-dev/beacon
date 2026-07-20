@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 type Props = {
   src: string | null;
@@ -7,6 +7,12 @@ type Props = {
 };
 
 export function ScreenshotModal({ src, alt = 'Screenshot', onClose }: Props) {
+  const [broken, setBroken] = useState(false);
+
+  useEffect(() => {
+    setBroken(false);
+  }, [src]);
+
   useEffect(() => {
     if (!src) return;
     function onKey(e: KeyboardEvent) {
@@ -33,7 +39,19 @@ export function ScreenshotModal({ src, alt = 'Screenshot', onClose }: Props) {
             ×
           </button>
         </header>
-        <img src={src} alt={alt} className="modal-image" />
+        {broken ? (
+          <p className="empty">
+            Screenshot could not be loaded. This is not your website — the image link may be missing
+            from storage, or an old row has no PNG.
+          </p>
+        ) : (
+          <img
+            src={src}
+            alt={alt}
+            className="modal-image"
+            onError={() => setBroken(true)}
+          />
+        )}
         <footer className="modal-footer">
           <a href={src} target="_blank" rel="noreferrer">
             Open full size
@@ -51,10 +69,16 @@ type ThumbProps = {
 };
 
 export function ScreenshotThumb({ src, alt = 'Screenshot', onOpen }: ThumbProps) {
+  const [broken, setBroken] = useState(false);
+
   if (!src) return <span className="muted-text">—</span>;
+  if (broken) {
+    return <span className="muted-text">Screenshot unavailable</span>;
+  }
+
   return (
     <button type="button" className="shot-thumb" onClick={() => onOpen(src)} title="Preview screenshot">
-      <img src={src} alt={alt} />
+      <img src={src} alt={alt} onError={() => setBroken(true)} />
       <span>Preview</span>
     </button>
   );

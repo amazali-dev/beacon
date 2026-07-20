@@ -30,7 +30,7 @@
       "device": "iPhone 14"
     }
   },
-  "geoCheckUrl": "https://ipapi.co/json/",
+  "geoCheckUrl": "https://ipwho.is/",
   "requiredCountry": "US",
   "deploymentMode": "staging",
   "stagingLabel": "Local NON-US test",
