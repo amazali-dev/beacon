@@ -124,6 +124,7 @@ async function main(): Promise<void> {
     geo,
     oneSite: hasFlag('--one-site'),
     oneProfile: hasFlag('--one-profile'),
+    allProfiles: hasFlag('--all-profiles'),
   });
 }
 

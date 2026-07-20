@@ -16,6 +16,7 @@ import type { DeviceProfile, GeoGuardResult, LoadCheckResult, SiteRow } from '..
 import { getBrowserLaunchOptions } from '../utils/browser.js';
 import { withMonitorParam } from '../utils/monitor-param.js';
 import { captureCheckScreenshot } from '../utils/screenshots.js';
+import { gotoWithRetries, sleep } from '../utils/navigate.js';
 import { maybeSendAlert } from '../alerts/email.js';
 
 const DEFAULT_SELECTORS: Record<string, string> = {
@@ -166,65 +167,6 @@ async function launchForProfile(profile: DeviceProfile): Promise<{
       timezoneId: 'America/New_York',
     },
   };
-}
-
-async function sleep(ms: number): Promise<void> {
-  await new Promise((r) => setTimeout(r, ms));
-}
-
-/**
- * Open a page with retries when the site/CDN returns 429 (too many requests) or 503.
- * Retries are slow and few — hammering a rate-limited CDN makes 429s worse.
- */
-async function gotoWithRetries(
-  page: Page,
-  url: string,
-  maxAttempts: number
-): Promise<{ statusCode: number | null; attempts: number; note: string | null }> {
-  let statusCode: number | null = null;
-  let note: string | null = null;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const response = await page.goto(url, {
-      waitUntil: 'domcontentloaded',
-      timeout: 45000,
-    });
-    statusCode = response?.status() ?? null;
-
-    if (statusCode !== null && statusCode >= 200 && statusCode < 400) {
-      await page.waitForLoadState('load', { timeout: 30000 }).catch(() => {});
-      if (attempt > 1) {
-        note = `Loaded after ${attempt} attempts (earlier responses were rate-limited)`;
-      }
-      return { statusCode, attempts: attempt, note };
-    }
-
-    if (statusCode === 429 || statusCode === 503) {
-      const retryAfter = response?.headers()?.['retry-after'];
-      const parsedRetry = retryAfter ? Number(retryAfter) * 1000 : NaN;
-      const backoff = Number.isFinite(parsedRetry)
-        ? Math.min(120_000, Math.max(15_000, parsedRetry))
-        : Math.min(90_000, 25_000 * 2 ** (attempt - 1));
-      console.log(
-        `  HTTP ${statusCode} from site/CDN — waiting ${Math.round(backoff / 1000)}s then retry ${attempt}/${maxAttempts}`
-      );
-      note = `Site returned HTTP ${statusCode} (too many requests). Retried ${attempt} time(s).`;
-      if (attempt < maxAttempts) {
-        await sleep(backoff);
-        continue;
-      }
-      return { statusCode, attempts: attempt, note };
-    }
-
-    // Other errors: one short retry for 5xx only
-    if (statusCode !== null && statusCode >= 500 && attempt < maxAttempts) {
-      await sleep(5000);
-      continue;
-    }
-    return { statusCode, attempts: attempt, note };
-  }
-
-  return { statusCode, attempts: maxAttempts, note };
 }
 
 async function measureWebVitals(page: Page): Promise<{ lcpMs: number | null; cls: number | null }> {
@@ -496,6 +438,8 @@ export async function runAllLoadChecks(opts: {
   geo: GeoGuardResult;
   oneSite?: boolean;
   oneProfile?: boolean;
+  /** Include Safari + Mobile (default false — reduces CDN 429s) */
+  allProfiles?: boolean;
 }): Promise<void> {
   const { fetchActiveSites } = await import('../db/supabase.js');
   const sites = await fetchActiveSites({ oneSite: opts.oneSite });
@@ -506,8 +450,13 @@ export async function runAllLoadChecks(opts: {
 
   const profiles: DeviceProfile[] = opts.oneProfile
     ? ['desktop']
-    : ['desktop', 'webkit', 'mobile'];
+    : opts.allProfiles
+      ? ['desktop', 'webkit', 'mobile']
+      : ['desktop']; // default: desktop only — Safari/Mobile triple the CDN hits and cause 429s
 
+  if (!opts.allProfiles && !opts.oneProfile) {
+    console.log('Load checks: desktop only (pass --all-profiles for Safari + Mobile).');
+  }
   console.log(
     `Load checks: ${sites.length} site(s) × ${profiles.length} profile(s). production=${opts.geo.isProduction}`
   );

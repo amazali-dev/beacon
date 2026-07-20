@@ -128,6 +128,10 @@ export function formLayerLabels(test: FormTest): {
 }
 
 export function formTestSummary(test: FormTest): string {
+  if (test.notes && /SKIPPED.*rate.?limit|CDN rate-limited|HTTP 429/i.test(test.notes)) {
+    return 'Skipped — site rate-limited (not a form failure)';
+  }
+
   const parts: string[] = [];
 
   // Layer 1 — did the quote form submit and show a thank-you page?

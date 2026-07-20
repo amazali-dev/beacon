@@ -3,6 +3,9 @@
  * Layer 1: fill + submit, look for confirmation
  * Layer 2: IMAP inbox (logo attachment + Run ID)
  * Layer 3: CRM hook (placeholder, disconnected)
+ *
+ * CDN HTTP 429 is treated as a skip (not a form failure) so rate limits
+ * do not open false "form broken" incidents.
  */
 
 import { join } from 'node:path';
@@ -20,6 +23,7 @@ import { verifyLeadInCrm } from '../hooks/crm-layer3.js';
 import { getBrowserLaunchOptions } from '../utils/browser.js';
 import { withMonitorParam } from '../utils/monitor-param.js';
 import { captureFormScreenshot } from '../utils/screenshots.js';
+import { gotoWithRetries, pageLooksRateLimited, sleep } from '../utils/navigate.js';
 import {
   clickQuoteSubmit,
   completeSignageQuoteSteps,
@@ -63,6 +67,7 @@ export async function runFormTestForSite(
   let submitToInboxSeconds: number | null = null;
   let logoUploadOk: boolean | null = null;
   let screenshotPath: string | null = null;
+  let rateLimited = false;
   const notes: string[] = [];
 
   if (!site.form_testing_enabled) {
@@ -80,94 +85,144 @@ export async function runFormTestForSite(
       slowMo: opts?.headed ? 250 : 0,
     })
   );
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const page = await browser.newPage({
+    viewport: { width: 1440, height: 900 },
+    locale: 'en-US',
+    timezoneId: 'America/New_York',
+  });
   const submittedAt = Date.now();
 
   try {
-    await page.goto(formUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
-    await page.waitForTimeout(2000);
-    await openQuoteFormIfNeeded(page);
-    await page.locator('form, [class*="quote" i]').first().scrollIntoViewIfNeeded().catch(() => {});
+    const maxAttempts = config.gotoMaxAttempts ?? 3;
+    const nav = await gotoWithRetries(page, formUrl, maxAttempts);
+    if (nav.note) notes.push(nav.note);
 
-    await fillContactFields(page, identity, selectors, notes);
-
-    if (selectors.file) {
-      try {
-        await page.locator(selectors.file).first().setInputFiles(logoPath);
-        logoUploadOk = true;
-      } catch {
-        logoUploadOk = false;
-        notes.push('Logo upload failed');
-      }
+    if (nav.rateLimited || (await pageLooksRateLimited(page))) {
+      rateLimited = true;
+      notes.push(
+        'SKIPPED: site/CDN rate-limited the form test (HTTP 429). Not counted as a form failure — will retry next slot.'
+      );
+      screenshotPath = await captureFormScreenshot(page, `form_ratelimit_${site.name}_${runId}`, 'failure');
     } else {
-      const fileInput = page.locator('input[type="file"]').first();
-      if (await fileInput.isVisible({ timeout: 2000 }).catch(() => false)) {
-        try {
-          await fileInput.setInputFiles(logoPath);
-          logoUploadOk = true;
-        } catch {
-          logoUploadOk = false;
-          notes.push('Logo upload failed');
+      await page.waitForTimeout(2500);
+      await openQuoteFormIfNeeded(page);
+      await page
+        .locator('form, [class*="quote" i]')
+        .first()
+        .scrollIntoViewIfNeeded()
+        .catch(() => {});
+
+      // If fields still missing, wait once more — often a soft block / slow hydrate after 429
+      const nameVisible = await page
+        .locator(
+          'input[name*="name" i], input[placeholder*="name" i], input[aria-label*="name" i]'
+        )
+        .first()
+        .isVisible({ timeout: 4000 })
+        .catch(() => false);
+      if (!nameVisible) {
+        await sleep(15000);
+        if (await pageLooksRateLimited(page)) {
+          rateLimited = true;
+          notes.push(
+            'SKIPPED: page still looks rate-limited after wait. Not counted as a form failure.'
+          );
         }
-      } else {
-        logoUploadOk = false;
-        notes.push('No file upload field detected');
       }
-    }
 
-    notes.push(...(await completeSignageQuoteSteps(page, message)));
-    await page.waitForTimeout(800);
+      if (!rateLimited) {
+        await fillContactFields(page, identity, selectors, notes);
 
-    await clickQuoteSubmit(page, selectors.submit);
-
-    const layer1Timeout = config.formLayer1TimeoutSeconds * 1000;
-    layer1 = await waitForThankYou(page, layer1Timeout);
-    if (!layer1) {
-      notes.push('Layer 1: no thank-you screen within timeout');
-    }
-
-    screenshotPath = await captureFormScreenshot(
-      page,
-      `form_${site.name}_${runId}`,
-      layer1 ? 'success' : 'failure'
-    );
-    if (layer1) notes.push('Thank-you screen captured');
-
-    if (isInboxVerificationEnabled()) {
-      try {
-        const inbox = await verifyInboxForRunId(runId, {
-          timeoutMinutes: config.formLayer2TimeoutMinutes,
-          requireAttachment: true,
-          submittedAt,
-        });
-        layer2 = inbox.found;
-        submitToInboxSeconds = inbox.delaySeconds;
-        if (!inbox.found) notes.push(inbox.note || 'Layer 2: Run ID email not found');
-        if (inbox.found && !inbox.hasAttachment) {
-          notes.push('Layer 2: email found but logo attachment missing');
-          layer2 = false;
+        if (selectors.file) {
+          try {
+            await page.locator(selectors.file).first().setInputFiles(logoPath);
+            logoUploadOk = true;
+          } catch {
+            logoUploadOk = false;
+            notes.push('Logo upload failed');
+          }
+        } else {
+          const fileInput = page.locator('input[type="file"]').first();
+          if (await fileInput.isVisible({ timeout: 2000 }).catch(() => false)) {
+            try {
+              await fileInput.setInputFiles(logoPath);
+              logoUploadOk = true;
+            } catch {
+              logoUploadOk = false;
+              notes.push('Logo upload failed');
+            }
+          } else {
+            logoUploadOk = false;
+            notes.push('No file upload field detected');
+          }
         }
-      } catch (err) {
-        layer2 = null;
-        notes.push(
-          `Layer 2 check failed to run: ${err instanceof Error ? err.message : String(err)}`
+
+        notes.push(...(await completeSignageQuoteSteps(page, message)));
+        await page.waitForTimeout(800);
+
+        await clickQuoteSubmit(page, selectors.submit);
+
+        const layer1Timeout = config.formLayer1TimeoutSeconds * 1000;
+        layer1 = await waitForThankYou(page, layer1Timeout);
+        if (!layer1) {
+          notes.push('Layer 1: no thank-you screen within timeout');
+        }
+
+        screenshotPath = await captureFormScreenshot(
+          page,
+          `form_${site.name}_${runId}`,
+          layer1 ? 'success' : 'failure'
         );
-      }
-    } else {
-      layer2 = null;
-    }
+        if (layer1) notes.push('Thank-you screen captured');
 
-    // Layer 3 — CRM placeholder (always disconnected for now)
-    const crm = await verifyLeadInCrm(runId);
-    layer3 = crm.pass;
-    if (crm.note) notes.push(crm.note);
+        if (isInboxVerificationEnabled()) {
+          try {
+            const inbox = await verifyInboxForRunId(runId, {
+              timeoutMinutes: config.formLayer2TimeoutMinutes,
+              requireAttachment: true,
+              submittedAt,
+            });
+            layer2 = inbox.found;
+            submitToInboxSeconds = inbox.delaySeconds;
+            if (!inbox.found) notes.push(inbox.note || 'Layer 2: Run ID email not found');
+            if (inbox.found && !inbox.hasAttachment) {
+              notes.push('Layer 2: email found but logo attachment missing');
+              layer2 = false;
+            }
+          } catch (err) {
+            layer2 = null;
+            notes.push(
+              `Layer 2 check failed to run: ${err instanceof Error ? err.message : String(err)}`
+            );
+          }
+        } else {
+          layer2 = null;
+        }
+
+        const crm = await verifyLeadInCrm(runId);
+        layer3 = crm.pass;
+        if (crm.note) notes.push(crm.note);
+      }
+    }
   } catch (err) {
-    notes.push(
-      `Form test failed to run: ${err instanceof Error ? err.message : String(err)}`
-    );
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/429|rate.?limit|too many requests/i.test(msg) || (await pageLooksRateLimited(page))) {
+      rateLimited = true;
+      notes.push(`SKIPPED due to rate limit: ${msg}`);
+    } else {
+      notes.push(`Form test failed to run: ${msg}`);
+      // Field/submit missing often means we landed on a block page after soft 429
+      if (
+        /submit button not found|field fill failed/i.test(notes.join(' ')) &&
+        (await pageLooksRateLimited(page))
+      ) {
+        rateLimited = true;
+        notes.push('SKIPPED: treated as CDN rate limit (block page), not a form bug.');
+        layer1 = null;
+      }
+    }
   }
 
-  // Always keep a screenshot for the Forms tab / Timeline (success or failure)
   if (!screenshotPath) {
     try {
       screenshotPath = await captureFormScreenshot(
@@ -181,6 +236,13 @@ export async function runFormTestForSite(
   }
 
   await browser.close();
+
+  // Rate-limited runs: leave layer1 null so dashboard does not treat as failed submit
+  if (rateLimited) {
+    layer1 = null;
+    layer2 = null;
+    logoUploadOk = null;
+  }
 
   await insertFormTest({
     site_id: site.id,
@@ -199,7 +261,7 @@ export async function runFormTestForSite(
 
   const submissionOnly = !isInboxVerificationEnabled();
   const anyFail =
-    layer1 === false || (!submissionOnly && layer2 === false);
+    !rateLimited && (layer1 === false || (!submissionOnly && layer2 === false));
   if (anyFail) {
     const id = await openIncident({
       site_id: site.id,
@@ -221,7 +283,7 @@ export async function runFormTestForSite(
   }
 
   console.log(
-    `  Form test ${site.name}: runId=${runId} L1=${layer1} L2=${layer2} L3=${layer3} inboxSec=${submitToInboxSeconds}`
+    `  Form test ${site.name}: runId=${runId} L1=${layer1} L2=${layer2} rateLimited=${rateLimited}`
   );
   if (notes.length) {
     console.log(`  Notes: ${notes.join(' | ')}`);
@@ -240,8 +302,20 @@ export async function runAllFormTests(opts: {
     console.log('No sites with form testing enabled.');
     return;
   }
-  for (const site of sites) {
+
+  const pauseMs = loadConfig().delayMsBetweenChecks ?? 18000;
+  // Cool down before forms so a just-finished load-check burst does not 429 the first site
+  console.log(`Form tests: waiting 45s before first site to avoid CDN rate limits…`);
+  await sleep(45_000);
+
+  for (let i = 0; i < sites.length; i++) {
+    const site = sites[i]!;
     console.log(`→ Form test ${site.name}…`);
     await runFormTestForSite(site, opts.geo, { headed: opts.headed });
+    if (i < sites.length - 1) {
+      const gap = pauseMs + 20_000;
+      console.log(`  pausing ${Math.round(gap / 1000)}s before next form site…`);
+      await sleep(gap);
+    }
   }
 }
