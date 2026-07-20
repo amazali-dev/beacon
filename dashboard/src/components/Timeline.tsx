@@ -40,6 +40,7 @@ function buildEvents(
   const events: TimelineEvent[] = [];
 
   for (const c of loadChecks) {
+    const slow = (c.load_ms ?? 0) > 8000;
     const rateLimited = c.status_code === 429 || c.status_code === 503;
     const bad =
       (!c.loaded || (c.status_code ?? 0) >= 400) && !rateLimited;
