@@ -7,6 +7,7 @@
  *   npm run form:one      — one site form test, headed browser
  *   npm run detect:forms  — auto-detect form field selectors
  *   npm run report:daily  — send daily report now
+ *   npm run drain:jobs    — process dashboard "Run now" queue
  *   npm run scheduler     — keep running on the schedule
  */
 
@@ -14,6 +15,7 @@ import { getDeploymentMode, getStagingLabel, isStagingMode, loadConfig } from '.
 import { hasSupabaseConfigured } from './db/supabase.js';
 import { touchEngineHeartbeat } from './db/settings.js';
 import { runGeoGuard } from './geo-guard.js';
+import { processPendingJobs } from './jobs/queue.js';
 import { runAllLoadChecks } from './modules/load-check.js';
 import { runAllFormTests } from './modules/form-test.js';
 import { detectFormsForAllSites } from './modules/form-detect.js';
@@ -74,6 +76,15 @@ async function main(): Promise<void> {
 
   if (hasFlag('--scheduler')) {
     await startScheduler();
+    return;
+  }
+
+  if (hasFlag('--drain-jobs')) {
+    const geo = await runGeoGuard();
+    await bumpHeartbeat(geo);
+    if (shouldSkipProductionWrite(geo)) return;
+    const ran = await processPendingJobs(8);
+    console.log(`Drain finished. Processed ${ran} job(s).`);
     return;
   }
 

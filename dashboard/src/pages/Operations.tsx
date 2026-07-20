@@ -17,27 +17,30 @@ import {
   TIME_LABEL,
 } from '../lib/time';
 
+const GITHUB_ACTIONS =
+  'https://github.com/amazali-dev/beacon/actions/workflows/queued-jobs.yml';
+
 const RUN_ACTIONS = [
   {
     jobType: 'load_check' as const,
     label: 'Load checks',
-    desc: 'Queues a local job only. For US production, use GitHub Actions → Run workflow.',
+    desc: 'Queues a US production load check for GitHub Actions.',
     primary: true,
   },
   {
     jobType: 'form_test' as const,
     label: 'Form tests',
-    desc: 'Queues a local job only. Production form tests run on GitHub on schedule.',
+    desc: 'Queues a US production form test for GitHub Actions.',
   },
   {
     jobType: 'detect_forms' as const,
     label: 'Detect fields',
-    desc: 'Auto-find name, email, phone, and upload fields (local queue).',
+    desc: 'Queues form-field detection on the US runner.',
   },
   {
     jobType: 'daily_report' as const,
     label: 'Daily report',
-    desc: 'Queues a local report job. Production report is the GitHub daily workflow.',
+    desc: 'Queues the daily report job on GitHub Actions.',
   },
 ];
 
@@ -105,9 +108,9 @@ export function Operations() {
     try {
       await queueJob(jobType);
       setMessage(
-        `"${label}" was added to Recent jobs below — but that queue only runs if a local engine is open. ` +
-          `For real US checks: GitHub → Actions → Load checks → Run workflow.`
+        `"${label}" queued. Open Queued jobs → Run workflow on GitHub to start it now (or wait for the next poll).`
       );
+      window.open(GITHUB_ACTIONS, '_blank', 'noopener,noreferrer');
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not queue job');
@@ -127,8 +130,7 @@ export function Operations() {
       <div className="page-head">
         <h1>Operations</h1>
         <p>
-          Production runs on <strong>GitHub Actions</strong> (US). This page shows status and
-          optional local queue jobs. Times shown in {TIME_LABEL}.
+          Production runs on <strong>GitHub Actions</strong> (US). Times shown in {TIME_LABEL}.
         </p>
       </div>
 
@@ -154,8 +156,7 @@ export function Operations() {
         <h2>Production schedule (GitHub — not editable here)</h2>
         <p className="section-hint">
           Changing times on this page does <strong>not</strong> change GitHub. Schedules live in
-          the workflow files. To change them later, ask Cursor to edit{' '}
-          <code>.github/workflows/</code>.
+          the workflow files.
         </p>
         <ul className="schedule-readonly">
           <li>
@@ -170,17 +171,14 @@ export function Operations() {
             {settings ? ` (≈ ${reportPkt} ${TIME_LABEL})` : ''}
           </li>
         </ul>
-        <p className="field-hint">
-          Watch real runs in this repo on GitHub → <strong>Actions</strong>. Scheduled runs say{' '}
-          <strong>Scheduled</strong>, not “Manually run”.
-        </p>
       </section>
 
       <section className="ops-panel">
-        <h2>Run now (local queue only)</h2>
+        <h2>Run now</h2>
         <p className="section-hint">
-          These buttons only write to the old job queue. They do <strong>not</strong> start GitHub
-          Actions. Prefer GitHub → Actions → Run workflow for production.
+          Click a button to queue the job, then on the GitHub tab that opens choose{' '}
+          <strong>Run workflow</strong> → <strong>Run workflow</strong>. Status updates in the
+          table below (pending → running → done).
         </p>
         <div className="action-grid">
           {RUN_ACTIONS.map((a) => (
@@ -195,6 +193,12 @@ export function Operations() {
             </button>
           ))}
         </div>
+        <p className="field-hint">
+          Direct link:{' '}
+          <a href={GITHUB_ACTIONS} target="_blank" rel="noreferrer">
+            Queued jobs workflow
+          </a>
+        </p>
       </section>
 
       {settings && (
@@ -252,10 +256,10 @@ export function Operations() {
       )}
 
       <section className="ops-panel table-wrap">
-        <h2>Recent jobs (dashboard queue only)</h2>
+        <h2>Recent Run now jobs</h2>
         <p className="section-hint">
-          This list is <strong>not</strong> GitHub Actions. It only shows jobs from the buttons
-          above. GitHub runs appear on the Actions tab and as new rows in Overview / load_checks.
+          Jobs from the buttons above. After you click <strong>Run workflow</strong> on GitHub,
+          status should move to done and new rows appear on Overview.
         </p>
         <table>
           <thead>
@@ -270,7 +274,7 @@ export function Operations() {
             {jobs.length === 0 && (
               <tr>
                 <td colSpan={4} className="meta">
-                  No queued jobs yet. That is normal if you only use GitHub Actions.
+                  No queued jobs yet.
                 </td>
               </tr>
             )}
@@ -285,7 +289,12 @@ export function Operations() {
                     {j.status}
                   </span>
                 </td>
-                <td>{j.notes || '—'}</td>
+                <td>
+                  {j.notes ||
+                    (j.status === 'pending'
+                      ? 'Waiting — Run “Queued jobs” workflow on GitHub'
+                      : '—')}
+                </td>
               </tr>
             ))}
           </tbody>

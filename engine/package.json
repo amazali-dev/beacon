@@ -14,6 +14,7 @@
     "form:one": "tsx src/index.ts --form-once --one-site --headed",
     "detect:forms": "tsx src/index.ts --detect-forms",
     "report:daily": "tsx src/index.ts --daily-report",
+    "drain:jobs": "tsx src/index.ts --drain-jobs",
     "scheduler": "tsx src/scheduler.ts"
   },
   "dependencies": {

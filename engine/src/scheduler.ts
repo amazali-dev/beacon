@@ -4,15 +4,9 @@
  */
 
 import { getDeploymentMode, getStagingLabel, isStagingMode } from './config.js';
-import {
-  claimNextJob,
-  fetchRuntimeSettings,
-  finishJob,
-  touchEngineHeartbeat,
-  type CheckJobType,
-} from './db/settings.js';
+import { fetchRuntimeSettings, touchEngineHeartbeat } from './db/settings.js';
 import { runGeoGuard } from './geo-guard.js';
-import { detectFormsForAllSites } from './modules/form-detect.js';
+import { processPendingJobs } from './jobs/queue.js';
 import { runAllFormTests } from './modules/form-test.js';
 import { runAllLoadChecks } from './modules/load-check.js';
 import { generateAndSendDailyReport } from './reports/daily.js';
@@ -40,41 +34,6 @@ function easternDateKey(): string {
     month: '2-digit',
     day: '2-digit',
   }).format(new Date());
-}
-
-async function runJobType(jobType: CheckJobType): Promise<void> {
-  const geo = await runGeoGuard();
-  switch (jobType) {
-    case 'load_check':
-      await runAllLoadChecks({ geo });
-      lastLoadRun = Date.now();
-      break;
-    case 'form_test':
-      await runAllFormTests({ geo });
-      break;
-    case 'detect_forms':
-      await detectFormsForAllSites();
-      break;
-    case 'daily_report':
-      await generateAndSendDailyReport();
-      break;
-  }
-}
-
-async function processPendingJobs(): Promise<void> {
-  for (let i = 0; i < 3; i++) {
-    const job = await claimNextJob();
-    if (!job) break;
-    console.log(`\n=== Dashboard job: ${job.job_type} ===`);
-    try {
-      await runJobType(job.job_type);
-      await finishJob(job.id, true);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      await finishJob(job.id, false, message);
-      console.error(`Job failed: ${message}`);
-    }
-  }
 }
 
 async function schedulerTick(): Promise<void> {
@@ -112,8 +71,8 @@ async function schedulerTick(): Promise<void> {
     firedFormSlots.add(formKey);
     console.log('\n=== Scheduled form-test run ===');
     try {
-      const geo = await runGeoGuard();
-      await runAllFormTests({ geo });
+      const geoForm = await runGeoGuard();
+      await runAllFormTests({ geo: geoForm });
     } catch (err) {
       console.error('Form test failed:', err);
     }
