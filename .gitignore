@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+.env.local
+*.log
+engine/screenshots-local/
+engine/dist/
+dashboard/dist/
+.DS_Store
+*.pem
+*.key
+credentials.json
+service-account*.json

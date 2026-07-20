@@ -1,0 +1,15 @@
+{
+  "name": "beacon",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Beacon — website monitoring (engine + dashboard)",
+  "scripts": {
+    "start": "concurrently -n engine,ui -c blue,cyan \"npm run scheduler --prefix engine\" \"npm run dev --prefix dashboard\"",
+    "engine": "npm run scheduler --prefix engine",
+    "ui": "npm run dev --prefix dashboard",
+    "install:all": "npm install && npm install --prefix engine && npm install --prefix dashboard"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

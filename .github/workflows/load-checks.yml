@@ -1,0 +1,85 @@
+# Load + render checks — every 30 minutes on GitHub-hosted US runners.
+# Manual "Run workflow" is also available (for testing or the future Run Now button).
+
+name: Load checks
+
+on:
+  schedule:
+    # Every 30 minutes (UTC). A few minutes late is normal for GitHub cron.
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: load-checks
+  cancel-in-progress: false
+
+jobs:
+  load-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: engine
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: engine/package-lock.json
+
+      - name: Install npm packages
+        run: npm ci
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('engine/package-lock.json') }}
+
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium webkit
+
+      - name: Install Playwright OS deps (when browsers were cached)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium webkit
+
+      - name: Keepalive ping
+        # Touching the GitHub API counts as repo activity so scheduled
+        # workflows are less likely to be disabled after 60 quiet days.
+        run: |
+          curl -sS -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}" > /dev/null
+          echo "Keepalive OK at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+      - name: Run load checks
+        env:
+          DEPLOYMENT_MODE: production
+          FORCE_PRODUCTION: 'true'
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          ALERT_TO: ${{ secrets.ALERT_TO }}
+          REPORT_TO: ${{ secrets.REPORT_TO }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          TEST_NAME: ${{ secrets.TEST_NAME }}
+          TEST_EMAIL: ${{ secrets.TEST_EMAIL }}
+          TEST_PHONE: ${{ secrets.TEST_PHONE }}
+          FORM_INBOX_VERIFICATION: ${{ secrets.FORM_INBOX_VERIFICATION }}
+          IMAP_HOST: ${{ secrets.IMAP_HOST }}
+          IMAP_PORT: ${{ secrets.IMAP_PORT }}
+          IMAP_USER: ${{ secrets.IMAP_USER }}
+          IMAP_PASS: ${{ secrets.IMAP_PASS }}
+          # Leave PROXY_URL secret empty (or unset) to go direct from the runner
+          PROXY_URL: ${{ secrets.PROXY_URL }}
+        run: npm run check:once

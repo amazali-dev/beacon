@@ -1,0 +1,32 @@
+# Weekly keepalive — prevents GitHub from disabling scheduled workflows
+# after 60 days with no repository activity.
+
+name: Keepalive
+
+on:
+  schedule:
+    # Every Monday at 12:00 UTC
+    - cron: '0 12 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Refresh keepalive timestamp
+        run: |
+          mkdir -p .github
+          date -u +%Y-%m-%dT%H:%M:%SZ > .github/keepalive-timestamp.txt
+          echo "Updated keepalive timestamp."
+
+      - name: Commit keepalive file
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: 'chore: keepalive (keep scheduled workflows active)'
+          file_pattern: .github/keepalive-timestamp.txt

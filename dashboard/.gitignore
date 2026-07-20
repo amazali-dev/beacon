@@ -1,0 +1,7 @@
+/* Cloudflare Pages */
+dist
+.wrangler
+.dev.vars
+.env
+.env.local
+node_modules

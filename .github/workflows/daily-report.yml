@@ -1,0 +1,71 @@
+# Daily HTML report email at 23:30 US Eastern.
+
+name: Daily report
+
+on:
+  schedule:
+    # 23:30 Eastern = 03:30 UTC (EDT) or 04:30 UTC (EST)
+    - cron: '30 3,4 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: daily-report
+  cancel-in-progress: false
+
+jobs:
+  daily-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: engine
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Only run near 23:30 US Eastern
+        id: gate
+        shell: bash
+        run: |
+          HOUR=$(TZ=America/New_York date +%H)
+          MIN=$(TZ=America/New_York date +%M)
+          # Accept 23:25–23:40 in case cron is a few minutes early/late
+          if [[ "$HOUR" == "23" && "$MIN" -ge 25 && "$MIN" -le 40 ]]; then
+            echo "due=true" >> "$GITHUB_OUTPUT"
+            echo "Eastern time is $HOUR:$MIN — sending daily report."
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "due=true" >> "$GITHUB_OUTPUT"
+            echo "Manual run — sending daily report."
+          else
+            echo "due=false" >> "$GITHUB_OUTPUT"
+            echo "Eastern time is $HOUR:$MIN — not report time. Skipping."
+          fi
+
+      - name: Setup Node.js
+        if: steps.gate.outputs.due == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: engine/package-lock.json
+
+      - name: Install npm packages
+        if: steps.gate.outputs.due == 'true'
+        run: npm ci
+
+      - name: Send daily report
+        if: steps.gate.outputs.due == 'true'
+        env:
+          DEPLOYMENT_MODE: production
+          FORCE_PRODUCTION: 'true'
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          ALERT_TO: ${{ secrets.ALERT_TO }}
+          REPORT_TO: ${{ secrets.REPORT_TO }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+        run: npm run report:daily
