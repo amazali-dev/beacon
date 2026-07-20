@@ -3,11 +3,12 @@
 
 name: Load checks
 
-# Triggers: every 30 minutes automatically (schedule) + manual Run workflow button
+# Triggers: GitHub schedule (often delayed) + manual Run workflow.
+# For reliable every-30-min runs, also use an external free cron (see chat instructions).
 on:
   schedule:
-    # :00 and :30 every hour, UTC (same as every 30 minutes)
-    - cron: '0,30 * * * *'
+    # Offset from :00/:30 to reduce GitHub dropping jobs at busy times
+    - cron: '7,37 * * * *'
   workflow_dispatch:
 
 concurrency:
