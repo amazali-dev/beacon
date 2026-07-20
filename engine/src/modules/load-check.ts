@@ -438,8 +438,6 @@ export async function runAllLoadChecks(opts: {
   geo: GeoGuardResult;
   oneSite?: boolean;
   oneProfile?: boolean;
-  /** Include Safari + Mobile (default false — reduces CDN 429s) */
-  allProfiles?: boolean;
 }): Promise<void> {
   const { fetchActiveSites } = await import('../db/supabase.js');
   const sites = await fetchActiveSites({ oneSite: opts.oneSite });
@@ -450,13 +448,8 @@ export async function runAllLoadChecks(opts: {
 
   const profiles: DeviceProfile[] = opts.oneProfile
     ? ['desktop']
-    : opts.allProfiles
-      ? ['desktop', 'webkit', 'mobile']
-      : ['desktop']; // default: desktop only — Safari/Mobile triple the CDN hits and cause 429s
+    : ['desktop', 'webkit', 'mobile'];
 
-  if (!opts.allProfiles && !opts.oneProfile) {
-    console.log('Load checks: desktop only (pass --all-profiles for Safari + Mobile).');
-  }
   console.log(
     `Load checks: ${sites.length} site(s) × ${profiles.length} profile(s). production=${opts.geo.isProduction}`
   );
