@@ -171,15 +171,8 @@ export function Operations() {
           </li>
         </ul>
         <p className="field-hint">
-          Watch real runs at{' '}
-          <a
-            href="https://github.com/amazali-dev/beacon/actions"
-            target="_blank"
-            rel="noreferrer"
-          >
-            github.com/amazali-dev/beacon/actions
-          </a>
-          . Scheduled runs say <strong>Scheduled</strong>, not “Manually run”.
+          Watch real runs in this repo on GitHub → <strong>Actions</strong>. Scheduled runs say{' '}
+          <strong>Scheduled</strong>, not “Manually run”.
         </p>
       </section>
 

@@ -10,8 +10,8 @@
   "screenshotRetentionDays": 30,
   "monitorQueryParam": "monitor=1",
   "testIdentity": {
-    "name": "amaz@beacon",
-    "email": "amaz@beacon.com",
+    "name": "MONITOR TEST",
+    "email": "monitor@example.com",
     "phone": "5550100100",
     "messageTemplate": "Automated monitoring test - please ignore. Run ID: {runId}"
   },

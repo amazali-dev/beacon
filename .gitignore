@@ -16,3 +16,10 @@ service-account*.json
 
 # Keep Supabase SQL on this PC only — never push to the public repo
 supabase/
+
+# Private docs / setup notes — keep on this PC only
+MONITORING_PROJECT_SPEC.md
+DEPLOY_ORACLE.md
+GITHUB_SECRETS.md
+GITHUB_SETUP.md
+README.md

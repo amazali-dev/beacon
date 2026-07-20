@@ -61,8 +61,8 @@ export function getStagingLabel(): string {
 /** Name / email / phone used when filling quote forms */
 export function getTestIdentity(config: EngineConfig) {
   return {
-    name: getEnv('TEST_NAME', config.testIdentity.name || 'amaz@beacon'),
-    email: getEnv('TEST_EMAIL', config.testIdentity.email || 'amaz@beacon.com'),
+    name: getEnv('TEST_NAME', config.testIdentity.name || 'MONITOR TEST'),
+    email: getEnv('TEST_EMAIL', config.testIdentity.email || 'monitor@example.com'),
     phone: getEnv('TEST_PHONE', config.testIdentity.phone || '5550100100'),
     messageTemplate: config.testIdentity.messageTemplate,
   };
