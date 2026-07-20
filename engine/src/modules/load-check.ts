@@ -21,9 +21,107 @@ import { maybeSendAlert } from '../alerts/email.js';
 const DEFAULT_SELECTORS: Record<string, string> = {
   logo: 'img[alt*="logo" i], a[href="/"] img, header img, .logo img, [class*="logo"] img',
   headline: 'h1',
-  cta: 'a[href*="quote" i], button:has-text("Quote"), a:has-text("Get a Quote"), a:has-text("Free Quote")',
+  // Broad fallback — real CTA check also uses role/text patterns below
+  cta: 'a[href*="quote" i], a[href*="mockup" i], button:has-text("Quote"), a:has-text("Quote")',
   quote_form: 'form, [class*="quote" i] form, form[action*="quote" i]',
 };
+
+/** Same site, ignore trailing slash / query / www so we can compare main vs form URL */
+function samePageUrl(a: string, b: string): boolean {
+  try {
+    const ua = new URL(a);
+    const ub = new URL(b);
+    const norm = (u: URL) =>
+      `${u.hostname.replace(/^www\./i, '')}${u.pathname.replace(/\/$/, '') || '/'}`.toLowerCase();
+    return norm(ua) === norm(ub);
+  } catch {
+    return a.replace(/\/$/, '') === b.replace(/\/$/, '');
+  }
+}
+
+/**
+ * Quote form is often on a different page than the homepage.
+ * Load checks only require the form when it lives on the same URL we just opened.
+ */
+function formExpectedOnMainPage(site: SiteRow): boolean {
+  if (!site.quote_form_url) return true;
+  return samePageUrl(site.main_url, site.quote_form_url);
+}
+
+const CTA_TEXT_PATTERNS = [
+  /get my free quote/i,
+  /get your free quote/i,
+  /get a quote/i,
+  /get free quote/i,
+  /free quote/i,
+  /request a quote/i,
+  /get my free mockup/i,
+  /get free.*mockup/i,
+  /free.*mockup/i,
+  /start design/i,
+  /talk to a sign/i,
+];
+
+async function elementPresent(page: Page, selector: string): Promise<boolean> {
+  try {
+    const loc = page.locator(selector);
+    const count = await loc.count();
+    if (count === 0) return false;
+    for (let i = 0; i < Math.min(count, 8); i++) {
+      if (await loc.nth(i).isVisible().catch(() => false)) return true;
+    }
+    // Present in the page even if not currently "visible" (menu, below fold, etc.)
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function checkCta(page: Page, siteSelectors: Record<string, string>): Promise<boolean> {
+  if (siteSelectors.cta && (await elementPresent(page, siteSelectors.cta))) {
+    return true;
+  }
+
+  for (const pattern of CTA_TEXT_PATTERNS) {
+    const byRole = page
+      .getByRole('link', { name: pattern })
+      .or(page.getByRole('button', { name: pattern }));
+    if ((await byRole.count()) > 0) return true;
+
+    const byText = page.getByText(pattern);
+    if ((await byText.count()) > 0) return true;
+  }
+
+  if (await elementPresent(page, DEFAULT_SELECTORS.cta)) return true;
+  return false;
+}
+
+async function checkElements(
+  page: Page,
+  site: SiteRow
+): Promise<Record<string, boolean>> {
+  const siteSelectors = site.selectors || {};
+  const result: Record<string, boolean> = {};
+
+  result.logo = siteSelectors.logo
+    ? await elementPresent(page, siteSelectors.logo)
+    : await elementPresent(page, DEFAULT_SELECTORS.logo);
+  result.headline = siteSelectors.headline
+    ? await elementPresent(page, siteSelectors.headline)
+    : await elementPresent(page, DEFAULT_SELECTORS.headline);
+  result.cta = await checkCta(page, siteSelectors);
+
+  if (formExpectedOnMainPage(site)) {
+    result.quote_form = siteSelectors.quote_form
+      ? await elementPresent(page, siteSelectors.quote_form)
+      : await elementPresent(page, DEFAULT_SELECTORS.quote_form);
+  } else {
+    // Form lives on quote_form_url — Module 2 (form tests) checks it there.
+    result.quote_form = true;
+  }
+
+  return result;
+}
 
 async function launchForProfile(profile: DeviceProfile): Promise<{
   browser: Browser;
@@ -81,23 +179,6 @@ async function measureWebVitals(page: Page): Promise<{ lcpMs: number | null; cls
   } catch {
     return { lcpMs: null, cls: null };
   }
-}
-
-async function checkElements(
-  page: Page,
-  selectors: Record<string, string>
-): Promise<Record<string, boolean>> {
-  const merged = { ...DEFAULT_SELECTORS, ...selectors };
-  const result: Record<string, boolean> = {};
-  for (const [name, selector] of Object.entries(merged)) {
-    try {
-      const loc = page.locator(selector).first();
-      result[name] = (await loc.count()) > 0 && (await loc.isVisible().catch(() => false));
-    } catch {
-      result[name] = false;
-    }
-  }
-  return result;
 }
 
 export async function runLoadCheckForSiteProfile(
@@ -158,19 +239,19 @@ export async function runLoadCheckForSiteProfile(
       const vitals = await measureWebVitals(page);
       lcpMs = vitals.lcpMs !== null ? Math.round(vitals.lcpMs) : null;
       cls = vitals.cls;
-      elementsOk = await checkElements(page, site.selectors || {});
+      elementsOk = await checkElements(page, site);
     } catch (err) {
       loaded = false;
       loadMs = Date.now() - started;
       notes = err instanceof Error ? err.message : String(err);
     }
 
-    const missingCritical =
-      elementsOk.cta === false || elementsOk.quote_form === false;
+    const missingCritical = elementsOk.cta === false;
     const failed =
       !loaded ||
       (statusCode !== null && statusCode >= 400) ||
-      missingCritical;
+      missingCritical ||
+      (formExpectedOnMainPage(site) && elementsOk.quote_form === false);
 
     if (failed) {
       screenshotPath = await captureFailureScreenshot(
@@ -201,7 +282,7 @@ export async function runLoadCheckForSiteProfile(
       !loaded ||
       (statusCode !== null && statusCode >= 400) ||
       elementsOk.cta === false ||
-      elementsOk.quote_form === false,
+      (formExpectedOnMainPage(site) && elementsOk.quote_form === false),
   };
 
   await insertLoadCheck({
@@ -241,11 +322,11 @@ export async function runLoadCheckForSiteProfile(
     await closeIncident(site.id, 'load_failure');
   }
 
-  if (result.elementsOk.cta === false || result.elementsOk.quote_form === false) {
+  if (result.elementsOk.cta === false) {
     const id = await openIncident({
       site_id: site.id,
       type: 'missing_element',
-      detail: `${site.name} [${profile}] missing CTA or quote form. elements=${JSON.stringify(result.elementsOk)}`,
+      detail: `${site.name} [${profile}] Get a Quote button/link not found on homepage. elements=${JSON.stringify(result.elementsOk)}`,
       screenshot_path: result.screenshotPath,
     });
     await maybeSendAlert({
@@ -253,7 +334,26 @@ export async function runLoadCheckForSiteProfile(
       siteId: site.id,
       siteName: site.name,
       type: 'missing_element',
-      detail: `${site.name} [${profile}] is missing a key element (CTA or quote form).`,
+      detail: `${site.name} [${profile}] is missing the Get a Quote CTA on the homepage.`,
+      screenshotPath: result.screenshotPath,
+      cooldownHours: config.alertCooldownHours,
+    });
+  } else if (
+    formExpectedOnMainPage(site) &&
+    result.elementsOk.quote_form === false
+  ) {
+    const id = await openIncident({
+      site_id: site.id,
+      type: 'missing_element',
+      detail: `${site.name} [${profile}] quote form expected on homepage but not found. elements=${JSON.stringify(result.elementsOk)}`,
+      screenshot_path: result.screenshotPath,
+    });
+    await maybeSendAlert({
+      incidentId: id,
+      siteId: site.id,
+      siteName: site.name,
+      type: 'missing_element',
+      detail: `${site.name} [${profile}] is missing the quote form on the homepage.`,
       screenshotPath: result.screenshotPath,
       cooldownHours: config.alertCooldownHours,
     });
