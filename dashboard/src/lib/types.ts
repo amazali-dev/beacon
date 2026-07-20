@@ -27,6 +27,8 @@ export type LoadCheck = {
   screenshot_path: string | null;
   is_production: boolean;
   notes: string | null;
+  check_country?: string | null;
+  check_ip?: string | null;
 };
 
 export type FormTest = {
@@ -41,6 +43,9 @@ export type FormTest = {
   logo_upload_ok: boolean | null;
   screenshot_path: string | null;
   notes: string | null;
+  is_production?: boolean;
+  check_country?: string | null;
+  check_ip?: string | null;
 };
 
 export type Incident = {

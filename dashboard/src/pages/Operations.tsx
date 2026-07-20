@@ -13,8 +13,7 @@ import {
   easternHmToPakistanHm,
   easternTimesToPakistanText,
   formatPakistanTime,
-  pakistanHmToEasternHm,
-  pakistanTimesTextToEastern,
+  formatRelativeTime,
   TIME_LABEL,
 } from '../lib/time';
 
@@ -22,23 +21,23 @@ const RUN_ACTIONS = [
   {
     jobType: 'load_check' as const,
     label: 'Load checks',
-    desc: 'Check all 5 sites on desktop, Safari, and mobile.',
+    desc: 'Queues a local job only. For US production, use GitHub Actions → Run workflow.',
     primary: true,
   },
   {
     jobType: 'form_test' as const,
     label: 'Form tests',
-    desc: 'Fill quote forms, submit, and capture thank-you screens.',
+    desc: 'Queues a local job only. Production form tests run on GitHub on schedule.',
   },
   {
     jobType: 'detect_forms' as const,
     label: 'Detect fields',
-    desc: 'Auto-find name, email, phone, and upload fields.',
+    desc: 'Auto-find name, email, phone, and upload fields (local queue).',
   },
   {
     jobType: 'daily_report' as const,
     label: 'Daily report',
-    desc: 'Send the summary email now (if SMTP is configured).',
+    desc: 'Queues a local report job. Production report is the GitHub daily workflow.',
   },
 ];
 
@@ -51,8 +50,6 @@ const JOB_LABELS: Record<string, string> = {
 
 export function Operations() {
   const [settings, setSettings] = useState<BeaconSettings | null>(null);
-  const [formTimesText, setFormTimesText] = useState('');
-  const [reportTimePkt, setReportTimePkt] = useState('');
   const [heartbeat, setHeartbeat] = useState<string | null>(null);
   const [engineMode, setEngineMode] = useState<string | null>(null);
   const [jobs, setJobs] = useState<CheckJob[]>([]);
@@ -68,8 +65,6 @@ export function Operations() {
         loadRecentJobs(),
       ]);
       setSettings(s);
-      setFormTimesText(easternTimesToPakistanText(s.formTestTimesEastern));
-      setReportTimePkt(easternHmToPakistanHm(s.dailyReportTimeEastern));
       setHeartbeat(hb);
       setEngineMode(mode);
       setJobs(recent);
@@ -85,16 +80,14 @@ export function Operations() {
     return () => clearInterval(t);
   }, [refresh]);
 
-  async function onSave(e: FormEvent) {
+  async function onSaveAdvanced(e: FormEvent) {
     e.preventDefault();
     if (!settings) return;
     setBusy(true);
     setMessage(null);
     try {
-      const formTestTimesEastern = pakistanTimesTextToEastern(formTimesText);
-      const dailyReportTimeEastern = pakistanHmToEasternHm(reportTimePkt);
-      await saveBeaconSettings({ ...settings, formTestTimesEastern, dailyReportTimeEastern });
-      setMessage('Schedule saved. The engine picks this up within about a minute.');
+      await saveBeaconSettings(settings);
+      setMessage('Alert settings saved.');
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Save failed');
@@ -112,7 +105,8 @@ export function Operations() {
     try {
       await queueJob(jobType);
       setMessage(
-        `"${label}" queued in Supabase. For production, use GitHub Actions → Load checks → Run workflow (local queue only works if npm start is running).`
+        `"${label}" was added to Recent jobs below — but that queue only runs if a local engine is open. ` +
+          `For real US checks: GitHub → Actions → Load checks → Run workflow.`
       );
       await refresh();
     } catch (err) {
@@ -121,38 +115,80 @@ export function Operations() {
   }
 
   const online = engineOnline(heartbeat);
-  const formScheduleHint = settings
-    ? `${settings.formTestTimesEastern.length} runs per day · every 6 hours`
-    : '';
+  const formTimesPkt = settings
+    ? easternTimesToPakistanText(settings.formTestTimesEastern)
+    : '—';
+  const reportPkt = settings
+    ? easternHmToPakistanHm(settings.dailyReportTimeEastern)
+    : '—';
 
   return (
     <div>
       <div className="page-head">
         <h1>Operations</h1>
-        <p>Run checks now, watch the engine, and tune the schedule. All times in {TIME_LABEL}.</p>
+        <p>
+          Production runs on <strong>GitHub Actions</strong> (US). This page shows status and
+          optional local queue jobs. Times shown in {TIME_LABEL}.
+        </p>
       </div>
 
       {error && <p className="error">{error}</p>}
       {message && <p className="ok-msg">{message}</p>}
 
       <section className="ops-panel">
-        <h2>Engine</h2>
+        <h2>Engine (GitHub Actions)</h2>
         <div className={`engine-status ${online ? 'online' : 'offline'}`}>
           <span className="dot" />
           <div>
-            <strong>{online ? 'Engine running' : 'Engine not detected'}</strong>
+            <strong>{online ? 'Last US run received' : 'No recent US run'}</strong>
             <p className="meta">
               {online
-                ? `Last seen ${formatPakistanTime(heartbeat)} ${TIME_LABEL} · ${engineMode || 'production'} mode`
-                : 'No recent GitHub Actions heartbeat yet — run Load checks once from the Actions tab.'}
+                ? `Heartbeat ${formatPakistanTime(heartbeat)} ${TIME_LABEL} (${formatRelativeTime(heartbeat)}) · ${engineMode || 'production'}`
+                : 'Open GitHub → Actions → Load checks, or wait for the next scheduled run (~every 30 min).'}
             </p>
           </div>
         </div>
       </section>
 
       <section className="ops-panel">
-        <h2>Run now</h2>
-        <p className="section-hint">Instant tests — no need to wait for the schedule.</p>
+        <h2>Production schedule (GitHub — not editable here)</h2>
+        <p className="section-hint">
+          Changing times on this page does <strong>not</strong> change GitHub. Schedules live in
+          the workflow files. To change them later, ask Cursor to edit{' '}
+          <code>.github/workflows/</code>.
+        </p>
+        <ul className="schedule-readonly">
+          <li>
+            <strong>Load checks</strong> — every 30 minutes (automatic)
+          </li>
+          <li>
+            <strong>Form tests</strong> — 00:00, 06:00, 12:00, 18:00 US Eastern
+            {settings ? ` (≈ ${formTimesPkt} ${TIME_LABEL})` : ''}
+          </li>
+          <li>
+            <strong>Daily report</strong> — 23:30 US Eastern
+            {settings ? ` (≈ ${reportPkt} ${TIME_LABEL})` : ''}
+          </li>
+        </ul>
+        <p className="field-hint">
+          Watch real runs at{' '}
+          <a
+            href="https://github.com/amazali-dev/beacon/actions"
+            target="_blank"
+            rel="noreferrer"
+          >
+            github.com/amazali-dev/beacon/actions
+          </a>
+          . Scheduled runs say <strong>Scheduled</strong>, not “Manually run”.
+        </p>
+      </section>
+
+      <section className="ops-panel">
+        <h2>Run now (local queue only)</h2>
+        <p className="section-hint">
+          These buttons only write to the old job queue. They do <strong>not</strong> start GitHub
+          Actions. Prefer GitHub → Actions → Run workflow for production.
+        </p>
         <div className="action-grid">
           {RUN_ACTIONS.map((a) => (
             <button
@@ -169,51 +205,13 @@ export function Operations() {
       </section>
 
       {settings && (
-        <form className="ops-panel settings-form ops-schedule" onSubmit={onSave}>
-          <h2>Schedule</h2>
-          <p className="section-hint">
-            Automatic runs while the engine is open. {formScheduleHint}
-          </p>
-
-          <label>
-            Load check interval (minutes)
-            <input
-              type="number"
-              min={5}
-              max={120}
-              value={settings.loadCheckIntervalMinutes}
-              onChange={(e) =>
-                setSettings({ ...settings, loadCheckIntervalMinutes: Number(e.target.value) })
-              }
-            />
-            <span className="field-hint">Default: every 30 minutes</span>
-          </label>
-
-          <label>
-            Form test times ({TIME_LABEL}, comma-separated HH:MM)
-            <input
-              value={formTimesText}
-              onChange={(e) => setFormTimesText(e.target.value)}
-              placeholder="09:00, 15:00, 21:00, 03:00"
-            />
-            <span className="field-hint">4 times per day, 6 hours apart</span>
-          </label>
-
-          <label>
-            Daily report time ({TIME_LABEL} HH:MM)
-            <input
-              value={reportTimePkt}
-              onChange={(e) => setReportTimePkt(e.target.value)}
-              placeholder="08:30"
-            />
-          </label>
-
+        <form className="ops-panel settings-form" onSubmit={onSaveAdvanced}>
           <button
             type="button"
             className="linkish advanced-toggle"
             onClick={() => setShowAdvanced((v) => !v)}
           >
-            {showAdvanced ? 'Hide advanced settings ▲' : 'Show advanced settings ▼'}
+            {showAdvanced ? 'Hide alert settings ▲' : 'Show alert settings ▼'}
           </button>
 
           {showAdvanced && (
@@ -250,19 +248,22 @@ export function Operations() {
                     setSettings({ ...settings, skipAlertsInStaging: e.target.checked })
                   }
                 />
-                Skip email alerts during staging
+                Skip email alerts during staging / local tests
               </label>
+              <button type="submit" className="primary" disabled={busy}>
+                {busy ? 'Saving…' : 'Save alert settings'}
+              </button>
             </>
           )}
-
-          <button type="submit" className="primary" disabled={busy}>
-            {busy ? 'Saving…' : 'Save schedule'}
-          </button>
         </form>
       )}
 
       <section className="ops-panel table-wrap">
-        <h2>Recent jobs</h2>
+        <h2>Recent jobs (dashboard queue only)</h2>
+        <p className="section-hint">
+          This list is <strong>not</strong> GitHub Actions. It only shows jobs from the buttons
+          above. GitHub runs appear on the Actions tab and as new rows in Overview / load_checks.
+        </p>
         <table>
           <thead>
             <tr>
@@ -273,12 +274,21 @@ export function Operations() {
             </tr>
           </thead>
           <tbody>
+            {jobs.length === 0 && (
+              <tr>
+                <td colSpan={4} className="meta">
+                  No queued jobs yet. That is normal if you only use GitHub Actions.
+                </td>
+              </tr>
+            )}
             {jobs.map((j) => (
               <tr key={j.id}>
                 <td>{formatPakistanTime(j.requested_at)}</td>
                 <td>{JOB_LABELS[j.job_type] || j.job_type}</td>
                 <td>
-                  <span className={`badge ${j.status === 'done' ? 'ok' : j.status === 'failed' ? 'bad' : 'muted'}`}>
+                  <span
+                    className={`badge ${j.status === 'done' ? 'ok' : j.status === 'failed' ? 'bad' : 'muted'}`}
+                  >
                     {j.status}
                   </span>
                 </td>
@@ -287,7 +297,6 @@ export function Operations() {
             ))}
           </tbody>
         </table>
-        {jobs.length === 0 && <p className="empty">No jobs yet — use Run now above.</p>}
       </section>
     </div>
   );

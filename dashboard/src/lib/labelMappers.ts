@@ -163,3 +163,28 @@ export function detectionStatusLabel(site: {
   if (keys.length >= 3) return 'Form test fields ready';
   return 'Needs form field detection';
 }
+
+/** Where the checker accessed the site from (US GitHub runner vs local). */
+export function formatRunLocation(row: {
+  check_country?: string | null;
+  check_ip?: string | null;
+  is_production?: boolean | null;
+}): string {
+  const country = (row.check_country || '').toUpperCase();
+  const ip = row.check_ip || '';
+  if (country && ip) {
+    const place =
+      country === 'US' ? `United States (${country})` : `Country ${country}`;
+    const kind = row.is_production ? 'GitHub Actions' : 'Local / non-production';
+    return `${place} · IP ${ip} · ${kind}`;
+  }
+  if (country) {
+    return country === 'US'
+      ? `United States (${country})${row.is_production ? ' · GitHub Actions' : ''}`
+      : `Country ${country}`;
+  }
+  if (row.is_production === true) return 'US production (location not stored on this older run)';
+  if (row.is_production === false) return 'Local / non-US test (location not stored on this older run)';
+  return 'Location not recorded';
+}
+

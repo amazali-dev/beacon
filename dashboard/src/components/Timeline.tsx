@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import type { FormTest, Incident, LoadCheck } from '../lib/types';
 import {
   formTestSummary,
+  formatRunLocation,
   incidentDetailPlain,
   incidentTypeLabel,
   profileLabel,
@@ -17,6 +18,7 @@ export type TimelineEvent = {
   timestamp: string;
   title: string;
   detail: string;
+  location: string | null;
   status: 'ok' | 'bad' | 'muted';
   screenshot_path: string | null;
 };
@@ -52,6 +54,7 @@ function buildEvents(
         : warn
           ? `Loaded in ${c.load_ms ?? '?'}ms — check CTA/form or speed`
           : `Loaded in ${c.load_ms ?? '?'}ms`,
+      location: formatRunLocation(c),
       status: bad ? 'bad' : warn ? 'muted' : 'ok',
       screenshot_path: c.screenshot_path,
     });
@@ -65,6 +68,7 @@ function buildEvents(
       timestamp: f.tested_at,
       title: `Form test · ${f.run_id}`,
       detail: f.notes ? `${formTestSummary(f)} — ${f.notes}` : formTestSummary(f),
+      location: formatRunLocation(f),
       status: failed ? 'bad' : f.layer1_pass === true ? 'ok' : 'muted',
       screenshot_path: f.screenshot_path,
     });
@@ -77,6 +81,7 @@ function buildEvents(
       timestamp: i.opened_at,
       title: `${incidentTypeLabel(i.type)} opened`,
       detail: incidentDetailPlain(i),
+      location: null,
       status: i.closed_at ? 'muted' : 'bad',
       screenshot_path: i.screenshot_path,
     });
@@ -87,6 +92,7 @@ function buildEvents(
         timestamp: i.closed_at,
         title: `${incidentTypeLabel(i.type)} resolved`,
         detail: incidentDetailPlain(i),
+        location: null,
         status: 'ok',
         screenshot_path: i.screenshot_path,
       });
@@ -122,7 +128,9 @@ export function Timeline({ loadChecks, formTests, incidents, onOpenScreenshot }:
     return allEvents.filter((e) => {
       if (!types.has(e.type)) return false;
       if (since && e.timestamp < since) return false;
-      if (q && !`${e.title} ${e.detail}`.toLowerCase().includes(q)) return false;
+      if (q && !`${e.title} ${e.detail} ${e.location || ''}`.toLowerCase().includes(q)) {
+        return false;
+      }
       return true;
     });
   }, [allEvents, types, timeframe, query]);
@@ -184,6 +192,7 @@ export function Timeline({ loadChecks, formTests, incidents, onOpenScreenshot }:
               <p className="meta">
                 {formatRelativeTime(e.timestamp)} · {formatPakistanTime(e.timestamp)} {TIME_LABEL}
               </p>
+              {e.location && <p className="run-location">Accessed from: {e.location}</p>}
               <p>{e.detail}</p>
               {e.screenshot_path && (
                 <ScreenshotThumb

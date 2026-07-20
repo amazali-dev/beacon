@@ -64,6 +64,8 @@ export async function insertLoadCheck(row: {
   screenshot_path: string | null;
   is_production: boolean;
   notes: string | null;
+  check_country?: string | null;
+  check_ip?: string | null;
 }): Promise<void> {
   const { error } = await getSupabase().from('load_checks').insert(row);
   if (error) {
@@ -82,6 +84,8 @@ export async function insertFormTest(row: {
   screenshot_path: string | null;
   notes: string | null;
   is_production: boolean;
+  check_country?: string | null;
+  check_ip?: string | null;
 }): Promise<void> {
   const { error } = await getSupabase().from('form_tests').insert(row);
   if (error) {

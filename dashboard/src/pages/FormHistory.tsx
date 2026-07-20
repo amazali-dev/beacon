@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { ScreenshotModal, ScreenshotThumb } from '../components/ScreenshotModal';
-import { formTestPassed, formTestSummary } from '../lib/labelMappers';
+import { formTestPassed, formTestSummary, formatRunLocation } from '../lib/labelMappers';
 import { formatPakistanTime, formatRelativeTime, TIME_LABEL } from '../lib/time';
 import type { FormTest, Site } from '../lib/types';
 
@@ -100,6 +100,7 @@ export function FormHistory() {
               <th>When</th>
               <th>Site</th>
               <th>Run ID</th>
+              <th>Accessed from</th>
               <th>Result</th>
               <th>Notes</th>
               <th>Screenshot</th>
@@ -120,6 +121,7 @@ export function FormHistory() {
                 <td>
                   <code>{r.run_id}</code>
                 </td>
+                <td className="notes-cell">{formatRunLocation(r)}</td>
                 <td>
                   <span className={`badge ${formTestPassed(r) ? 'ok' : r.layer1_pass === false ? 'bad' : 'muted'}`}>
                     {formTestSummary(r)}

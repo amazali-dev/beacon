@@ -9,6 +9,7 @@ import {
   detectionStatusLabel,
   formTestPassed,
   formTestSummary,
+  formatRunLocation,
   healthFromChecks,
   healthLabel,
   healthReasons,
@@ -185,6 +186,7 @@ export function SiteDetail() {
                     <strong>{profileLabel(c.profile)}</strong>
                     <span>{c.load_ms ?? '—'}ms</span>
                     <span className="meta">{formatRelativeTime(c.checked_at)}</span>
+                    <span className="meta run-location">{formatRunLocation(c)}</span>
                   </li>
                 ))}
               </ul>
@@ -201,6 +203,7 @@ export function SiteDetail() {
                 <p className="meta">
                   {formatRelativeTime(latestForm.tested_at)} · {latestForm.run_id}
                 </p>
+                <p className="run-location">Accessed from: {formatRunLocation(latestForm)}</p>
                 {latestForm.notes && <p className="notes-block">{latestForm.notes}</p>}
                 <ScreenshotThumb
                   src={latestForm.screenshot_path}
@@ -258,6 +261,7 @@ export function SiteDetail() {
                 <tr>
                   <th>When</th>
                   <th>Run ID</th>
+                  <th>Accessed from</th>
                   <th>Result</th>
                   <th>Notes</th>
                   <th>Screenshot</th>
@@ -273,6 +277,7 @@ export function SiteDetail() {
                     <td>
                       <code>{f.run_id}</code>
                     </td>
+                    <td className="notes-cell">{formatRunLocation(f)}</td>
                     <td>
                       <span className={`badge ${formTestPassed(f) ? 'ok' : f.layer1_pass === false ? 'bad' : 'muted'}`}>
                         {formTestSummary(f)}

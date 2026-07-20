@@ -545,9 +545,15 @@ th {
   font-size: 0.82rem;
 }
 
-.next-run-card.location-card .location-text {
-  font-size: 1.15rem;
-  line-height: 1.25;
+.run-location {
+  color: color-mix(in oklab, var(--accent) 70%, var(--muted));
+  font-size: 0.84rem;
+  margin: 0.15rem 0 0.35rem;
+}
+
+
+.schedule-readonly strong {
+  color: var(--text);
 }
 
 .summary-stat {

@@ -310,6 +310,8 @@ export async function runLoadCheckForSiteProfile(
     screenshot_path: result.screenshotPath,
     is_production: geo.isProduction,
     notes: result.notes,
+    check_country: geo.country,
+    check_ip: geo.ip,
   });
 
   // Incidents + alerts
@@ -457,6 +459,8 @@ export async function runAllLoadChecks(opts: {
           screenshot_path: null,
           is_production: opts.geo.isProduction,
           notes: `check failed to run: ${message}`,
+          check_country: opts.geo.country,
+          check_ip: opts.geo.ip,
         });
       }
     }

@@ -185,6 +185,8 @@ export async function runFormTestForSite(
     screenshot_path: screenshotPath,
     notes: notes.join(' | ') || null,
     is_production: geo.isProduction,
+    check_country: geo.country,
+    check_ip: geo.ip,
   });
 
   const submissionOnly = !isInboxVerificationEnabled();
