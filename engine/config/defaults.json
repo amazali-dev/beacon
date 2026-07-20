@@ -32,6 +32,8 @@
   },
   "geoCheckUrl": "https://ipwho.is/",
   "requiredCountry": "US",
+  "delayMsBetweenChecks": 4000,
+  "gotoMaxAttempts": 4,
   "deploymentMode": "staging",
   "stagingLabel": "Local NON-US test",
   "skipAlertsInStaging": true

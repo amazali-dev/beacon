@@ -40,10 +40,14 @@ function buildEvents(
   const events: TimelineEvent[] = [];
 
   for (const c of loadChecks) {
-    const slow = (c.load_ms ?? 0) > 8000;
-    const bad = !c.loaded || (c.status_code ?? 0) >= 400;
+    const rateLimited = c.status_code === 429 || c.status_code === 503;
+    const bad =
+      (!c.loaded || (c.status_code ?? 0) >= 400) && !rateLimited;
     const warn =
-      c.elements_ok?.cta === false || c.elements_ok?.quote_form === false || slow;
+      rateLimited ||
+      c.elements_ok?.cta === false ||
+      c.elements_ok?.quote_form === false ||
+      slow;
     events.push({
       id: `load-${c.id}`,
       type: 'load',
@@ -51,9 +55,11 @@ function buildEvents(
       title: `Load check · ${profileLabel(c.profile)}`,
       detail: bad
         ? `Failed to load (${c.status_code ?? 'no status'})`
-        : warn
-          ? `Loaded in ${c.load_ms ?? '?'}ms — check CTA/form or speed`
-          : `Loaded in ${c.load_ms ?? '?'}ms`,
+        : rateLimited
+          ? `Site rate-limited checker (HTTP ${c.status_code})`
+          : warn
+            ? `Loaded in ${c.load_ms ?? '?'}ms — check CTA/form or speed`
+            : `Loaded in ${c.load_ms ?? '?'}ms`,
       location: formatRunLocation(c),
       status: bad ? 'bad' : warn ? 'muted' : 'ok',
       screenshot_path: c.screenshot_path,

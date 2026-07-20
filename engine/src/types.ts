@@ -47,6 +47,10 @@ export interface EngineConfig {
   >;
   geoCheckUrl: string;
   requiredCountry: string;
+  /** Pause between each site×profile check so CDNs do not return HTTP 429 */
+  delayMsBetweenChecks?: number;
+  /** How many times to retry page open on 429/503 */
+  gotoMaxAttempts?: number;
   /** staging = local NON-US test runs; production = GitHub Actions US runners */
   deploymentMode: 'staging' | 'production';
   stagingLabel: string;

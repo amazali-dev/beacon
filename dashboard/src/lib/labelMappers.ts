@@ -31,7 +31,15 @@ export function healthFromChecks(checks: LoadCheck[], slowThresholdMs = 8000): H
     if (!latestByProfile.has(c.profile)) latestByProfile.set(c.profile, c);
   }
   const latest = [...latestByProfile.values()];
-  if (latest.some((c) => !c.loaded || (c.status_code ?? 0) >= 400)) return 'red';
+  const hardFail = latest.some(
+    (c) =>
+      (!c.loaded || (c.status_code ?? 0) >= 400) &&
+      c.status_code !== 429 &&
+      c.status_code !== 503
+  );
+  if (hardFail) return 'red';
+  // 429/503 = temporary rate limit from site/CDN — not a true outage
+  if (latest.some((c) => c.status_code === 429 || c.status_code === 503)) return 'yellow';
   if (
     latest.some(
       (c) =>
@@ -54,7 +62,13 @@ export function healthReasons(checks: LoadCheck[], slowThresholdMs = 8000): stri
   const reasons: string[] = [];
   for (const c of latestByProfile.values()) {
     if (!c.loaded || (c.status_code ?? 0) >= 400) {
-      reasons.push(`${profileLabel(c.profile)}: site did not load`);
+      if (c.status_code === 429 || c.status_code === 503) {
+        reasons.push(
+          `${profileLabel(c.profile)}: site rate-limited the checker (HTTP ${c.status_code})`
+        );
+      } else {
+        reasons.push(`${profileLabel(c.profile)}: site did not load`);
+      }
     } else if (c.elements_ok?.cta === false) {
       reasons.push(`${profileLabel(c.profile)}: Get a Quote button not found`);
     } else if (c.elements_ok?.quote_form === false) {
@@ -84,7 +98,10 @@ export function incidentTypeLabel(type: string): string {
     case 'form_test_failure':
       return 'Form test failed';
     case 'load_check_failure':
+    case 'load_failure':
       return 'Load check failed';
+    case 'rate_limited':
+      return 'Site rate-limited monitor';
     case 'slow_load':
       return 'Slow load';
     default:

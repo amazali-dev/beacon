@@ -157,6 +157,60 @@ async function launchForProfile(profile: DeviceProfile): Promise<{
   };
 }
 
+async function sleep(ms: number): Promise<void> {
+  await new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Open a page with retries when the site/CDN returns 429 (too many requests) or 503.
+ */
+async function gotoWithRetries(
+  page: Page,
+  url: string,
+  maxAttempts: number
+): Promise<{ statusCode: number | null; attempts: number; note: string | null }> {
+  let statusCode: number | null = null;
+  let note: string | null = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const response = await page.goto(url, {
+      waitUntil: 'domcontentloaded',
+      timeout: 45000,
+    });
+    statusCode = response?.status() ?? null;
+
+    if (statusCode !== null && statusCode >= 200 && statusCode < 400) {
+      await page.waitForLoadState('load', { timeout: 30000 }).catch(() => {});
+      if (attempt > 1) {
+        note = `Loaded after ${attempt} attempts (earlier responses were rate-limited)`;
+      }
+      return { statusCode, attempts: attempt, note };
+    }
+
+    if (statusCode === 429 || statusCode === 503) {
+      const waitMs = Math.min(45_000, 3000 * 2 ** (attempt - 1));
+      console.log(
+        `  HTTP ${statusCode} from site/CDN — waiting ${Math.round(waitMs / 1000)}s then retry ${attempt}/${maxAttempts}`
+      );
+      note = `Site returned HTTP ${statusCode} (too many requests). Retried ${attempt} time(s).`;
+      if (attempt < maxAttempts) {
+        await sleep(waitMs);
+        continue;
+      }
+      return { statusCode, attempts: attempt, note };
+    }
+
+    // Other errors: one short retry for 5xx only
+    if (statusCode !== null && statusCode >= 500 && attempt < maxAttempts) {
+      await sleep(2500);
+      continue;
+    }
+    return { statusCode, attempts: attempt, note };
+  }
+
+  return { statusCode, attempts: maxAttempts, note };
+}
+
 async function measureWebVitals(page: Page): Promise<{ lcpMs: number | null; cls: number | null }> {
   try {
     return await page.evaluate(() => {
@@ -234,18 +288,21 @@ export async function runLoadCheckForSiteProfile(
 
     const started = Date.now();
     try {
-      const response = await page.goto(url, {
-        waitUntil: 'load',
-        timeout: 45000,
-      });
-      statusCode = response?.status() ?? null;
+      const maxAttempts = loadConfig().gotoMaxAttempts ?? 4;
+      const nav = await gotoWithRetries(page, url, maxAttempts);
+      statusCode = nav.statusCode;
       loadMs = Date.now() - started;
       loaded = statusCode !== null && statusCode >= 200 && statusCode < 400;
-      await page.waitForTimeout(800);
-      const vitals = await measureWebVitals(page);
-      lcpMs = vitals.lcpMs !== null ? Math.round(vitals.lcpMs) : null;
-      cls = vitals.cls;
-      elementsOk = await checkElements(page, site);
+      notes = nav.note;
+      if (loaded) {
+        await page.waitForTimeout(800);
+        const vitals = await measureWebVitals(page);
+        lcpMs = vitals.lcpMs !== null ? Math.round(vitals.lcpMs) : null;
+        cls = vitals.cls;
+        elementsOk = await checkElements(page, site);
+      } else {
+        elementsOk = {};
+      }
     } catch (err) {
       loaded = false;
       loadMs = Date.now() - started;
@@ -315,7 +372,25 @@ export async function runLoadCheckForSiteProfile(
   });
 
   // Incidents + alerts
-  if (!result.loaded || (result.statusCode !== null && result.statusCode >= 400)) {
+  if (result.statusCode === 429 || result.statusCode === 503) {
+    const id = await openIncident({
+      site_id: site.id,
+      type: 'rate_limited',
+      detail: `${site.name} [${profile}] site/CDN rate-limited the checker (HTTP ${result.statusCode}). ${result.notes || ''}`,
+      screenshot_path: result.screenshotPath,
+    });
+    await maybeSendAlert({
+      incidentId: id,
+      siteId: site.id,
+      siteName: site.name,
+      type: 'rate_limited',
+      detail: `${site.name} temporarily blocked the monitor (HTTP ${result.statusCode}). Will retry next run.`,
+      screenshotPath: result.screenshotPath,
+      cooldownHours: config.alertCooldownHours,
+    });
+    // Do not also mark as a hard load_failure for 429
+    await closeIncident(site.id, 'load_failure');
+  } else if (!result.loaded || (result.statusCode !== null && result.statusCode >= 400)) {
     const id = await openIncident({
       site_id: site.id,
       type: 'load_failure',
@@ -331,8 +406,10 @@ export async function runLoadCheckForSiteProfile(
       screenshotPath: result.screenshotPath,
       cooldownHours: config.alertCooldownHours,
     });
+    await closeIncident(site.id, 'rate_limited');
   } else {
     await closeIncident(site.id, 'load_failure');
+    await closeIncident(site.id, 'rate_limited');
   }
 
   if (!formExpectedOnMainPage(site) && result.elementsOk.cta === false) {
@@ -463,6 +540,8 @@ export async function runAllLoadChecks(opts: {
           check_ip: opts.geo.ip,
         });
       }
+      const pause = loadConfig().delayMsBetweenChecks ?? 4000;
+      await sleep(pause);
     }
   }
 }
