@@ -30,9 +30,9 @@
       "device": "iPhone 14"
     }
   },
-  "geoCheckUrl": "https://ipwho.is/",
+  "geoCheckUrl": "https://cloudflare.com/cdn-cgi/trace",
   "requiredCountry": "US",
-  "delayMsBetweenChecks": 4000,
+  "delayMsBetweenChecks": 6000,
   "gotoMaxAttempts": 4,
   "deploymentMode": "staging",
   "stagingLabel": "Local NON-US test",

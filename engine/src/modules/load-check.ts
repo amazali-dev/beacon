@@ -320,7 +320,9 @@ export async function runLoadCheckForSiteProfile(
       (statusCode !== null && statusCode >= 400) ||
       missingCritical;
 
-    if (failed) {
+    // Skip screenshots for CDN rate-limit pages — they only show "429" and confuse the dashboard
+    const rateLimited = statusCode === 429 || statusCode === 503;
+    if (failed && !rateLimited) {
       screenshotPath = await captureFailureScreenshot(
         page,
         `${site.name}_${profile}`
