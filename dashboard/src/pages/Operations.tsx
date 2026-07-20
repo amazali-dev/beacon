@@ -4,10 +4,12 @@ import {
   engineOnline,
   loadBeaconSettings,
   loadRecentJobs,
-  queueJob,
+  queueAndTriggerJob,
   saveBeaconSettings,
+  saveGithubDispatchToken,
   type BeaconSettings,
   type CheckJob,
+  type JobType,
 } from '../lib/operations';
 import {
   easternHmToPakistanHm,
@@ -17,30 +19,32 @@ import {
   TIME_LABEL,
 } from '../lib/time';
 
-const GITHUB_ACTIONS =
-  'https://github.com/amazali-dev/beacon/actions/workflows/queued-jobs.yml';
-
-const RUN_ACTIONS = [
+const RUN_ACTIONS: Array<{
+  jobType: JobType;
+  label: string;
+  desc: string;
+  primary?: boolean;
+}> = [
   {
-    jobType: 'load_check' as const,
+    jobType: 'load_check',
     label: 'Load checks',
-    desc: 'Queues a US production load check for GitHub Actions.',
+    desc: 'Starts a US GitHub Actions load check now.',
     primary: true,
   },
   {
-    jobType: 'form_test' as const,
+    jobType: 'form_test',
     label: 'Form tests',
-    desc: 'Queues a US production form test for GitHub Actions.',
+    desc: 'Starts a US GitHub Actions form test now.',
   },
   {
-    jobType: 'detect_forms' as const,
+    jobType: 'detect_forms',
     label: 'Detect fields',
-    desc: 'Queues form-field detection on the US runner.',
+    desc: 'Starts form-field detection on the US runner now.',
   },
   {
-    jobType: 'daily_report' as const,
+    jobType: 'daily_report',
     label: 'Daily report',
-    desc: 'Queues the daily report job on GitHub Actions.',
+    desc: 'Starts the daily report job on GitHub Actions now.',
   },
 ];
 
@@ -55,21 +59,23 @@ export function Operations() {
   const [settings, setSettings] = useState<BeaconSettings | null>(null);
   const [heartbeat, setHeartbeat] = useState<string | null>(null);
   const [engineMode, setEngineMode] = useState<string | null>(null);
+  const [hasGithubToken, setHasGithubToken] = useState(false);
+  const [tokenDraft, setTokenDraft] = useState('');
   const [jobs, setJobs] = useState<CheckJob[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [runningJob, setRunningJob] = useState<JobType | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
-      const [{ settings: s, heartbeat: hb, engineMode: mode }, recent] = await Promise.all([
-        loadBeaconSettings(),
-        loadRecentJobs(),
-      ]);
+      const [{ settings: s, heartbeat: hb, engineMode: mode, hasGithubToken: tok }, recent] =
+        await Promise.all([loadBeaconSettings(), loadRecentJobs()]);
       setSettings(s);
       setHeartbeat(hb);
       setEngineMode(mode);
+      setHasGithubToken(tok);
       setJobs(recent);
       setError(null);
     } catch (e) {
@@ -90,7 +96,12 @@ export function Operations() {
     setMessage(null);
     try {
       await saveBeaconSettings(settings);
-      setMessage('Alert settings saved.');
+      if (tokenDraft.trim()) {
+        await saveGithubDispatchToken(tokenDraft);
+        setTokenDraft('');
+        setHasGithubToken(true);
+      }
+      setMessage('Settings saved.');
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Save failed');
@@ -99,21 +110,42 @@ export function Operations() {
     }
   }
 
-  async function runNow(
-    jobType: 'load_check' | 'form_test' | 'detect_forms' | 'daily_report',
-    label: string
-  ) {
+  async function onSaveTokenOnly(e: FormEvent) {
+    e.preventDefault();
+    if (!tokenDraft.trim()) {
+      setError('Paste your GitHub fine-grained PAT first.');
+      return;
+    }
+    setBusy(true);
     setMessage(null);
     setError(null);
     try {
-      await queueJob(jobType);
-      setMessage(
-        `"${label}" queued. Open Queued jobs → Run workflow on GitHub to start it now (or wait for the next poll).`
-      );
-      window.open(GITHUB_ACTIONS, '_blank', 'noopener,noreferrer');
+      await saveGithubDispatchToken(tokenDraft);
+      setTokenDraft('');
+      setHasGithubToken(true);
+      setMessage('GitHub token saved. Run now buttons will start Actions immediately.');
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not queue job');
+      setError(err instanceof Error ? err.message : 'Could not save token');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runNow(jobType: JobType, label: string) {
+    setMessage(null);
+    setError(null);
+    setRunningJob(jobType);
+    try {
+      await queueAndTriggerJob(jobType);
+      setMessage(
+        `"${label}" started on GitHub Actions (US). Status below updates as it runs — results appear on Overview when done.`
+      );
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not start job');
+    } finally {
+      setRunningJob(null);
     }
   }
 
@@ -146,21 +178,43 @@ export function Operations() {
             <p className="meta">
               {online
                 ? `Heartbeat ${formatPakistanTime(heartbeat)} ${TIME_LABEL} (${formatRelativeTime(heartbeat)}) · ${engineMode || 'production'}`
-                : 'Open GitHub → Actions → Load checks, or wait for the next scheduled run (~every 30 min).'}
+                : 'Use Run now below, or wait for the next scheduled load check (~every 30 min).'}
             </p>
           </div>
         </div>
       </section>
 
+      {!hasGithubToken && (
+        <section className="ops-panel">
+          <h2>One-time setup — GitHub token</h2>
+          <p className="section-hint">
+            Same fine-grained PAT you used for cron-job.org: <strong>Actions: Read and write</strong>,{' '}
+            <strong>Contents: Read</strong>, repo <code>amazali-dev/beacon</code>. This lets Run now
+            start the workflow when you click (no GitHub tab).
+          </p>
+          <form className="settings-form" onSubmit={onSaveTokenOnly}>
+            <label>
+              GitHub fine-grained PAT
+              <input
+                type="password"
+                autoComplete="off"
+                value={tokenDraft}
+                onChange={(e) => setTokenDraft(e.target.value)}
+                placeholder="github_pat_…"
+              />
+            </label>
+            <button type="submit" className="primary" disabled={busy}>
+              {busy ? 'Saving…' : 'Save token'}
+            </button>
+          </form>
+        </section>
+      )}
+
       <section className="ops-panel">
-        <h2>Production schedule (GitHub — not editable here)</h2>
-        <p className="section-hint">
-          Changing times on this page does <strong>not</strong> change GitHub. Schedules live in
-          the workflow files.
-        </p>
+        <h2>Production schedule (automatic)</h2>
         <ul className="schedule-readonly">
           <li>
-            <strong>Load checks</strong> — every 30 minutes (automatic)
+            <strong>Load checks</strong> — every 30 minutes
           </li>
           <li>
             <strong>Form tests</strong> — 00:00, 06:00, 12:00, 18:00 US Eastern
@@ -176,9 +230,8 @@ export function Operations() {
       <section className="ops-panel">
         <h2>Run now</h2>
         <p className="section-hint">
-          Click a button to queue the job, then on the GitHub tab that opens choose{' '}
-          <strong>Run workflow</strong> → <strong>Run workflow</strong>. Status updates in the
-          table below (pending → running → done).
+          One click queues the job and starts GitHub Actions on a US runner.
+          {!hasGithubToken && ' Save the GitHub token above first.'}
         </p>
         <div className="action-grid">
           {RUN_ACTIONS.map((a) => (
@@ -186,19 +239,14 @@ export function Operations() {
               key={a.jobType}
               type="button"
               className={`action-card ${a.primary ? 'primary' : ''}`}
+              disabled={!hasGithubToken || runningJob !== null}
               onClick={() => void runNow(a.jobType, a.label)}
             >
-              <strong>{a.label}</strong>
+              <strong>{runningJob === a.jobType ? 'Starting…' : a.label}</strong>
               <span>{a.desc}</span>
             </button>
           ))}
         </div>
-        <p className="field-hint">
-          Direct link:{' '}
-          <a href={GITHUB_ACTIONS} target="_blank" rel="noreferrer">
-            Queued jobs workflow
-          </a>
-        </p>
       </section>
 
       {settings && (
@@ -247,6 +295,16 @@ export function Operations() {
                 />
                 Skip email alerts during staging / local tests
               </label>
+              <label>
+                Replace GitHub Run now token (optional)
+                <input
+                  type="password"
+                  autoComplete="off"
+                  value={tokenDraft}
+                  onChange={(e) => setTokenDraft(e.target.value)}
+                  placeholder={hasGithubToken ? '•••••••• (leave blank to keep)' : 'github_pat_…'}
+                />
+              </label>
               <button type="submit" className="primary" disabled={busy}>
                 {busy ? 'Saving…' : 'Save alert settings'}
               </button>
@@ -258,8 +316,7 @@ export function Operations() {
       <section className="ops-panel table-wrap">
         <h2>Recent Run now jobs</h2>
         <p className="section-hint">
-          Jobs from the buttons above. After you click <strong>Run workflow</strong> on GitHub,
-          status should move to done and new rows appear on Overview.
+          pending → running → done. When done, new rows show on Overview / Timeline.
         </p>
         <table>
           <thead>
@@ -291,9 +348,7 @@ export function Operations() {
                 </td>
                 <td>
                   {j.notes ||
-                    (j.status === 'pending'
-                      ? 'Waiting — Run “Queued jobs” workflow on GitHub'
-                      : '—')}
+                    (j.status === 'pending' ? 'Queued — waiting for GitHub runner' : '—')}
                 </td>
               </tr>
             ))}
