@@ -15,7 +15,7 @@ import {
 import type { DeviceProfile, GeoGuardResult, LoadCheckResult, SiteRow } from '../types.js';
 import { getBrowserLaunchOptions } from '../utils/browser.js';
 import { withMonitorParam } from '../utils/monitor-param.js';
-import { captureFailureScreenshot } from '../utils/screenshots.js';
+import { captureCheckScreenshot } from '../utils/screenshots.js';
 import { maybeSendAlert } from '../alerts/email.js';
 
 const DEFAULT_SELECTORS: Record<string, string> = {
@@ -320,13 +320,16 @@ export async function runLoadCheckForSiteProfile(
       (statusCode !== null && statusCode >= 400) ||
       missingCritical;
 
-    // Skip screenshots for CDN rate-limit pages — they only show "429" and confuse the dashboard
-    const rateLimited = statusCode === 429 || statusCode === 503;
-    if (failed && !rateLimited) {
-      screenshotPath = await captureFailureScreenshot(
+    // Always capture for every profile (desktop / Safari / mobile) so Timeline can Preview
+    try {
+      screenshotPath = await captureCheckScreenshot(
         page,
-        `${site.name}_${profile}`
+        `${site.name}_${profile}`,
+        failed ? 'failure' : 'success',
+        failed ? 'failures' : 'load-checks'
       );
+    } catch (err) {
+      console.warn('Load-check screenshot failed:', err);
     }
 
     await context.close();

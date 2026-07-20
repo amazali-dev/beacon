@@ -165,14 +165,22 @@ export async function runFormTestForSite(
     notes.push(
       `Form test failed to run: ${err instanceof Error ? err.message : String(err)}`
     );
+  }
+
+  // Always keep a screenshot for the Forms tab / Timeline (success or failure)
+  if (!screenshotPath) {
     try {
-      screenshotPath = await captureFormScreenshot(page, `form_error_${site.name}`, 'failure');
+      screenshotPath = await captureFormScreenshot(
+        page,
+        `form_${site.name}_${runId}`,
+        layer1 ? 'success' : 'failure'
+      );
     } catch {
       /* ignore */
     }
-  } finally {
-    await browser.close();
   }
+
+  await browser.close();
 
   await insertFormTest({
     site_id: site.id,

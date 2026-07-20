@@ -1,5 +1,6 @@
 /**
- * Saves failure screenshots locally, then uploads them to Supabase Storage.
+ * Saves check screenshots locally, then uploads them to Supabase Storage.
+ * Used for every load profile (desktop / Safari / mobile) and form tests.
  */
 
 import { mkdir, unlink } from 'node:fs/promises';
@@ -8,10 +9,13 @@ import type { Page } from 'playwright';
 import { engineRootPath } from '../config.js';
 import { uploadScreenshot } from '../db/supabase.js';
 
-export async function captureFormScreenshot(
+export type ScreenshotKind = 'success' | 'failure';
+
+export async function captureCheckScreenshot(
   page: Page,
   label: string,
-  kind: 'success' | 'failure' = 'failure'
+  kind: ScreenshotKind = 'success',
+  folder: 'load-checks' | 'form-success' | 'failures' = 'load-checks'
 ): Promise<string | null> {
   try {
     const dir = join(engineRootPath(), 'screenshots-local');
@@ -21,10 +25,9 @@ export async function captureFormScreenshot(
     const localPath = join(dir, filename);
     await page.screenshot({ path: localPath, fullPage: true });
 
-    const remotePath = `${kind === 'success' ? 'form-success' : 'failures'}/${filename}`;
+    const remotePath = `${folder}/${filename}`;
     const publicUrl = await uploadScreenshot(localPath, remotePath);
 
-    // Keep disk small — delete local copy after upload attempt
     try {
       await unlink(localPath);
     } catch {
@@ -38,10 +41,23 @@ export async function captureFormScreenshot(
   }
 }
 
-/** @deprecated Use captureFormScreenshot */
+export async function captureFormScreenshot(
+  page: Page,
+  label: string,
+  kind: ScreenshotKind = 'failure'
+): Promise<string | null> {
+  return captureCheckScreenshot(
+    page,
+    label,
+    kind,
+    kind === 'success' ? 'form-success' : 'failures'
+  );
+}
+
+/** @deprecated Use captureCheckScreenshot */
 export async function captureFailureScreenshot(
   page: Page,
   label: string
 ): Promise<string | null> {
-  return captureFormScreenshot(page, label, 'failure');
+  return captureCheckScreenshot(page, label, 'failure', 'failures');
 }

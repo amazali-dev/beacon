@@ -749,6 +749,26 @@ th {
   margin-bottom: 0.35rem;
 }
 
+.metric-list li.metric-with-shot {
+  align-items: start;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.metric-list li.metric-with-shot:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.metric-list li.metric-with-shot > div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.metric-list li.metric-with-shot strong {
+  display: block;
+}
+
 .notes-block {
   font-size: 0.85rem;
   color: var(--muted);

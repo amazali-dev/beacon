@@ -182,11 +182,18 @@ export function SiteDetail() {
             ) : (
               <ul className="metric-list">
                 {[...new Map(checks.map((c) => [c.profile, c])).values()].map((c) => (
-                  <li key={c.id}>
-                    <strong>{profileLabel(c.profile)}</strong>
-                    <span>{c.load_ms ?? '—'}ms</span>
-                    <span className="meta">{formatRelativeTime(c.checked_at)}</span>
-                    <span className="meta run-location">{formatRunLocation(c)}</span>
+                  <li key={c.id} className="metric-with-shot">
+                    <div>
+                      <strong>{profileLabel(c.profile)}</strong>
+                      <span>{c.load_ms ?? '—'}ms</span>
+                      <span className="meta">{formatRelativeTime(c.checked_at)}</span>
+                      <span className="meta run-location">{formatRunLocation(c)}</span>
+                    </div>
+                    <ScreenshotThumb
+                      src={c.screenshot_path}
+                      alt={`${profileLabel(c.profile)} load check`}
+                      onOpen={(src) => openShot(src, `${profileLabel(c.profile)} load check`)}
+                    />
                   </li>
                 ))}
               </ul>
