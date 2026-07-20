@@ -22,11 +22,32 @@ import type { FormTest, Incident, LoadCheck, Site } from '../lib/types';
 
 const TABS = [
   { id: 'overview', label: 'Overview' },
+  { id: 'visits', label: 'Visits' },
   { id: 'speed', label: 'Speed' },
   { id: 'forms', label: 'Forms' },
   { id: 'incidents', label: 'Incidents' },
   { id: 'timeline', label: 'Timeline' },
 ];
+
+function loadCheckResultLabel(c: LoadCheck): string {
+  if (c.status_code === 429 || c.status_code === 503) {
+    return `Rate limited (HTTP ${c.status_code})`;
+  }
+  if (!c.loaded || (c.status_code ?? 0) >= 400) {
+    return `Failed (${c.status_code ?? 'no status'})`;
+  }
+  const slow = (c.load_ms ?? 0) > 8000;
+  return slow ? `Slow · ${c.load_ms}ms` : `OK · ${c.load_ms ?? '?'}ms`;
+}
+
+function loadCheckBadge(c: LoadCheck): 'ok' | 'bad' | 'muted' {
+  if (c.status_code === 429 || c.status_code === 503) return 'muted';
+  if (!c.loaded || (c.status_code ?? 0) >= 400) return 'bad';
+  if ((c.load_ms ?? 0) > 8000 || c.elements_ok?.cta === false || c.elements_ok?.quote_form === false) {
+    return 'muted';
+  }
+  return 'ok';
+}
 
 export function SiteDetail() {
   const { siteId = '' } = useParams();
@@ -40,6 +61,8 @@ export function SiteDetail() {
   const [chartRange, setChartRange] = useState<'24h' | '7d'>('24h');
   const [formFilter, setFormFilter] = useState<'all' | 'pass' | 'fail'>('all');
   const [formQuery, setFormQuery] = useState('');
+  const [visitProfile, setVisitProfile] = useState<'all' | string>('all');
+  const [visitFilter, setVisitFilter] = useState<'all' | 'ok' | 'fail' | 'slow'>('all');
   const [showClosedIncidents, setShowClosedIncidents] = useState(false);
   const [modal, setModal] = useState<{ src: string; alt: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -117,6 +140,20 @@ export function SiteDetail() {
       return true;
     });
   }, [formTests, formFilter, formQuery]);
+
+  const filteredVisits = useMemo(() => {
+    return checks.filter((c) => {
+      if (visitProfile !== 'all' && c.profile !== visitProfile) return false;
+      const badge = loadCheckBadge(c);
+      if (visitFilter === 'ok' && badge !== 'ok') return false;
+      if (visitFilter === 'fail' && badge !== 'bad' && c.status_code !== 429 && c.status_code !== 503) {
+        return false;
+      }
+      if (visitFilter === 'fail' && badge === 'ok') return false;
+      if (visitFilter === 'slow' && !((c.load_ms ?? 0) > 8000 && c.loaded)) return false;
+      return true;
+    });
+  }, [checks, visitProfile, visitFilter]);
 
   function setTab(id: string) {
     setParams({ tab: id });
@@ -237,6 +274,85 @@ export function SiteDetail() {
 
       {tab === 'speed' && (
         <SiteCharts checks={chartChecks} range={chartRange} onRangeChange={setChartRange} />
+      )}
+
+      {tab === 'visits' && (
+        <div>
+          <p className="section-hint">
+            Every website load check (Desktop, Safari, Mobile) with screenshot Preview when captured.
+          </p>
+          <div className="filter-bar">
+            <label>
+              Browser
+              <select
+                value={visitProfile}
+                onChange={(e) => setVisitProfile(e.target.value)}
+              >
+                <option value="all">All</option>
+                <option value="desktop">Desktop</option>
+                <option value="webkit">Safari</option>
+                <option value="mobile">Mobile</option>
+              </select>
+            </label>
+            <label>
+              Result
+              <select
+                value={visitFilter}
+                onChange={(e) => setVisitFilter(e.target.value as 'all' | 'ok' | 'fail' | 'slow')}
+              >
+                <option value="all">All</option>
+                <option value="ok">Healthy</option>
+                <option value="slow">Slow</option>
+                <option value="fail">Failed / limited</option>
+              </select>
+            </label>
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>When</th>
+                  <th>Browser</th>
+                  <th>Accessed from</th>
+                  <th>Result</th>
+                  <th>Notes</th>
+                  <th>Screenshot</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredVisits.map((c) => {
+                  const title = `${profileLabel(c.profile)} · ${formatPakistanTime(c.checked_at)}`;
+                  return (
+                    <tr key={c.id}>
+                      <td>
+                        {formatRelativeTime(c.checked_at)}
+                        <div className="meta">
+                          {formatPakistanTime(c.checked_at)} {TIME_LABEL}
+                        </div>
+                      </td>
+                      <td>{profileLabel(c.profile)}</td>
+                      <td className="notes-cell">{formatRunLocation(c)}</td>
+                      <td>
+                        <span className={`badge ${loadCheckBadge(c)}`}>
+                          {loadCheckResultLabel(c)}
+                        </span>
+                      </td>
+                      <td className="notes-cell">{c.notes || '—'}</td>
+                      <td>
+                        <ScreenshotThumb
+                          src={c.screenshot_path}
+                          alt={title}
+                          onOpen={(src) => openShot(src, title)}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {filteredVisits.length === 0 && <p className="empty">No load checks match.</p>}
+        </div>
       )}
 
       {tab === 'forms' && (

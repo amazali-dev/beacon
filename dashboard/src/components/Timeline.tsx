@@ -201,13 +201,11 @@ export function Timeline({ loadChecks, formTests, incidents, onOpenScreenshot }:
               </p>
               {e.location && <p className="run-location">Accessed from: {e.location}</p>}
               <p>{e.detail}</p>
-              {e.screenshot_path && (
-                <ScreenshotThumb
-                  src={e.screenshot_path}
-                  alt={e.title}
-                  onOpen={(src) => onOpenScreenshot(src, e.title)}
-                />
-              )}
+              <ScreenshotThumb
+                src={e.screenshot_path}
+                alt={e.title}
+                onOpen={(src) => onOpenScreenshot(src, e.title)}
+              />
             </div>
           </li>
         ))}
