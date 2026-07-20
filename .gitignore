@@ -13,3 +13,6 @@ dashboard/dist/
 *.key
 credentials.json
 service-account*.json
+
+# Keep Supabase SQL on this PC only — never push to the public repo
+supabase/
