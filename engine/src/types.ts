@@ -49,7 +49,11 @@ export interface EngineConfig {
   requiredCountry: string;
   /** Pause between each site×profile check so CDNs do not return HTTP 429 */
   delayMsBetweenChecks?: number;
-  /** How many times to retry page open on 429/503 */
+  /** Extra pause after finishing all sites for one profile before the next profile */
+  delayMsBetweenProfiles?: number;
+  /** Extra pause after a 429/503 before the next check */
+  delayMsAfterRateLimit?: number;
+  /** How many times to retry page open on 429/503 (keep low — retries make rate limits worse) */
   gotoMaxAttempts?: number;
   /** staging = local NON-US test runs; production = GitHub Actions US runners */
   deploymentMode: 'staging' | 'production';

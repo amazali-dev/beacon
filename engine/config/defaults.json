@@ -32,8 +32,10 @@
   },
   "geoCheckUrl": "https://cloudflare.com/cdn-cgi/trace",
   "requiredCountry": "US",
-  "delayMsBetweenChecks": 6000,
-  "gotoMaxAttempts": 4,
+  "delayMsBetweenChecks": 18000,
+  "delayMsBetweenProfiles": 45000,
+  "delayMsAfterRateLimit": 60000,
+  "gotoMaxAttempts": 2,
   "deploymentMode": "staging",
   "stagingLabel": "Local NON-US test",
   "skipAlertsInStaging": true

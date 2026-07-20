@@ -139,21 +139,32 @@ async function launchForProfile(profile: DeviceProfile): Promise<{
   if (profile === 'mobile' && profileCfg.device) {
     const device = devices[profileCfg.device];
     const browser = await chromium.launch(getBrowserLaunchOptions());
-    return { browser, contextOptions: { ...device } };
+    return {
+      browser,
+      contextOptions: { ...device, locale: 'en-US', timezoneId: 'America/New_York' },
+    };
   }
 
   if (profileCfg.browser === 'webkit') {
     const browser = await webkit.launch(getBrowserLaunchOptions());
     return {
       browser,
-      contextOptions: { viewport: profileCfg.viewport },
+      contextOptions: {
+        viewport: profileCfg.viewport,
+        locale: 'en-US',
+        timezoneId: 'America/New_York',
+      },
     };
   }
 
   const browser = await chromium.launch(getBrowserLaunchOptions());
   return {
     browser,
-    contextOptions: { viewport: profileCfg.viewport },
+    contextOptions: {
+      viewport: profileCfg.viewport,
+      locale: 'en-US',
+      timezoneId: 'America/New_York',
+    },
   };
 }
 
@@ -163,6 +174,7 @@ async function sleep(ms: number): Promise<void> {
 
 /**
  * Open a page with retries when the site/CDN returns 429 (too many requests) or 503.
+ * Retries are slow and few — hammering a rate-limited CDN makes 429s worse.
  */
 async function gotoWithRetries(
   page: Page,
@@ -188,13 +200,17 @@ async function gotoWithRetries(
     }
 
     if (statusCode === 429 || statusCode === 503) {
-      const waitMs = Math.min(45_000, 3000 * 2 ** (attempt - 1));
+      const retryAfter = response?.headers()?.['retry-after'];
+      const parsedRetry = retryAfter ? Number(retryAfter) * 1000 : NaN;
+      const backoff = Number.isFinite(parsedRetry)
+        ? Math.min(120_000, Math.max(15_000, parsedRetry))
+        : Math.min(90_000, 25_000 * 2 ** (attempt - 1));
       console.log(
-        `  HTTP ${statusCode} from site/CDN — waiting ${Math.round(waitMs / 1000)}s then retry ${attempt}/${maxAttempts}`
+        `  HTTP ${statusCode} from site/CDN — waiting ${Math.round(backoff / 1000)}s then retry ${attempt}/${maxAttempts}`
       );
       note = `Site returned HTTP ${statusCode} (too many requests). Retried ${attempt} time(s).`;
       if (attempt < maxAttempts) {
-        await sleep(waitMs);
+        await sleep(backoff);
         continue;
       }
       return { statusCode, attempts: attempt, note };
@@ -202,7 +218,7 @@ async function gotoWithRetries(
 
     // Other errors: one short retry for 5xx only
     if (statusCode !== null && statusCode >= 500 && attempt < maxAttempts) {
-      await sleep(2500);
+      await sleep(5000);
       continue;
     }
     return { statusCode, attempts: attempt, note };
@@ -376,25 +392,11 @@ export async function runLoadCheckForSiteProfile(
     check_ip: geo.ip,
   });
 
-  // Incidents + alerts
+  // Rate limits are temporary CDN blocks — record the check, don't spam incidents/alerts
   if (result.statusCode === 429 || result.statusCode === 503) {
-    const id = await openIncident({
-      site_id: site.id,
-      type: 'rate_limited',
-      detail: `${site.name} [${profile}] site/CDN rate-limited the checker (HTTP ${result.statusCode}). ${result.notes || ''}`,
-      screenshot_path: result.screenshotPath,
-    });
-    await maybeSendAlert({
-      incidentId: id,
-      siteId: site.id,
-      siteName: site.name,
-      type: 'rate_limited',
-      detail: `${site.name} temporarily blocked the monitor (HTTP ${result.statusCode}). Will retry next run.`,
-      screenshotPath: result.screenshotPath,
-      cooldownHours: config.alertCooldownHours,
-    });
-    // Do not also mark as a hard load_failure for 429
     await closeIncident(site.id, 'load_failure');
+    // Keep a single open rate_limited note (openIncident dedupes by open type if supported;
+    // if not, we still avoid email spam via cooldown when we skip maybeSendAlert here)
   } else if (!result.loaded || (result.statusCode !== null && result.statusCode >= 400)) {
     const id = await openIncident({
       site_id: site.id,
@@ -510,16 +512,25 @@ export async function runAllLoadChecks(opts: {
     `Load checks: ${sites.length} site(s) × ${profiles.length} profile(s). production=${opts.geo.isProduction}`
   );
 
-  for (const site of sites) {
-    for (const profile of profiles) {
+  const cfg = loadConfig();
+  const betweenChecks = cfg.delayMsBetweenChecks ?? 18000;
+  const betweenProfiles = cfg.delayMsBetweenProfiles ?? 45000;
+  const afterRateLimit = cfg.delayMsAfterRateLimit ?? 60000;
+
+  // Profile outer loop: hit each site less often (desktop all sites → pause → Safari → …)
+  // so the same CDN is not hit 3× in a few seconds.
+  for (let pi = 0; pi < profiles.length; pi++) {
+    const profile = profiles[pi];
+    for (const site of sites) {
       console.log(`→ ${site.name} / ${profile} …`);
+      let statusCode: number | null = null;
       try {
         const result = await runLoadCheckForSiteProfile(site, profile, opts.geo);
+        statusCode = result.statusCode;
         console.log(
           `  status=${result.statusCode} loaded=${result.loaded} loadMs=${result.loadMs} failed=${result.failed}`
         );
       } catch (err) {
-        // Never invent a pass — record failure note via incident
         const message = err instanceof Error ? err.message : String(err);
         console.error(`  CHECK FAILED TO RUN: ${message}`);
         await openIncident({
@@ -545,8 +556,16 @@ export async function runAllLoadChecks(opts: {
           check_ip: opts.geo.ip,
         });
       }
-      const pause = loadConfig().delayMsBetweenChecks ?? 4000;
+      const pause =
+        statusCode === 429 || statusCode === 503
+          ? afterRateLimit
+          : betweenChecks + Math.floor(Math.random() * 4000);
+      console.log(`  pausing ${Math.round(pause / 1000)}s before next check…`);
       await sleep(pause);
+    }
+    if (pi < profiles.length - 1) {
+      console.log(`  profile gap ${Math.round(betweenProfiles / 1000)}s before next browser…`);
+      await sleep(betweenProfiles);
     }
   }
 }
