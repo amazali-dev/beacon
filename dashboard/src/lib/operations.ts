@@ -49,6 +49,10 @@ export async function loadBeaconSettings(): Promise<{
   settings: BeaconSettings;
   heartbeat: string | null;
   engineMode: string | null;
+  geoCountry: string | null;
+  geoIp: string | null;
+  geoLabel: string | null;
+  geoSource: string | null;
 }> {
   const { data, error } = await supabase.from('app_settings').select('key,value');
   if (error) throw new Error(error.message);
@@ -65,8 +69,12 @@ export async function loadBeaconSettings(): Promise<{
 
   const heartbeat = (map.get('engine_heartbeat') as string) || null;
   const engineMode = (map.get('engine_mode') as string) || null;
+  const geoCountry = (map.get('engine_geo_country') as string) || null;
+  const geoIp = (map.get('engine_geo_ip') as string) || null;
+  const geoLabel = (map.get('engine_geo_label') as string) || null;
+  const geoSource = (map.get('engine_geo_source') as string) || null;
 
-  return { settings, heartbeat, engineMode };
+  return { settings, heartbeat, engineMode, geoCountry, geoIp, geoLabel, geoSource };
 }
 
 export async function saveBeaconSettings(settings: BeaconSettings): Promise<void> {
@@ -96,7 +104,12 @@ export async function loadRecentJobs(): Promise<CheckJob[]> {
   return (data || []) as CheckJob[];
 }
 
+/**
+ * Engine is "online" if GitHub Actions (or a local run) reported a heartbeat
+ * within the last 45 minutes. Load checks run every 30 minutes, so a 3-minute
+ * window would always look offline on GitHub Actions.
+ */
 export function engineOnline(heartbeat: string | null): boolean {
   if (!heartbeat) return false;
-  return Date.now() - new Date(heartbeat).getTime() < 3 * 60 * 1000;
+  return Date.now() - new Date(heartbeat).getTime() < 45 * 60 * 1000;
 }

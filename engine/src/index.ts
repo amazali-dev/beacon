@@ -24,7 +24,11 @@ import type { GeoGuardResult } from './types.js';
 /** Mark the engine as alive so the dashboard watchdog stays green */
 async function bumpHeartbeat(geo: GeoGuardResult): Promise<void> {
   try {
-    await touchEngineHeartbeat(geo.isProduction ? 'production' : getDeploymentMode());
+    await touchEngineHeartbeat(geo.isProduction ? 'production' : getDeploymentMode(), {
+      country: geo.country,
+      ip: geo.ip,
+      isUs: geo.isUs,
+    });
   } catch (err) {
     console.warn('Could not update engine heartbeat:', err);
   }

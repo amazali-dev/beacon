@@ -53,6 +53,11 @@ export function FormHistory() {
       <div className="page-head">
         <h1>Form tests</h1>
         <p>Quote form submissions across all sites. Plain-language results with screenshots.</p>
+        <p className="meta form-legend">
+          <strong>Submit</strong> = form filled and thank-you appeared.{" "}
+          <strong>Email / Skipped</strong> = inbox checking is optional and currently off.{" "}
+          <strong>CRM / Skipped</strong> = not connected yet.
+        </p>
       </div>
 
       <div className="filter-bar">

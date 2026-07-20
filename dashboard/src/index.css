@@ -506,6 +506,50 @@ th {
   margin-bottom: 1.25rem;
 }
 
+.next-run-panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.next-run-card {
+  background: linear-gradient(
+    145deg,
+    color-mix(in oklab, var(--accent) 12%, var(--panel)),
+    var(--panel)
+  );
+  border: 1px solid color-mix(in oklab, var(--accent) 28%, var(--line));
+  border-radius: 0.65rem;
+  padding: 0.9rem 1rem;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.next-run-label {
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.next-run-countdown {
+  font-family: var(--display);
+  font-size: 1.85rem;
+  line-height: 1.1;
+  color: var(--text);
+}
+
+.next-run-when {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.next-run-card.location-card .location-text {
+  font-size: 1.15rem;
+  line-height: 1.25;
+}
+
 .summary-stat {
   background: var(--panel);
   border: 1px solid var(--line);

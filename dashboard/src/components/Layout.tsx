@@ -70,7 +70,7 @@ export function Layout() {
       <main className="main">
         {import.meta.env.VITE_BEACON_ENV !== 'production' && (
           <div className="staging-banner" role="status">
-            {import.meta.env.VITE_STAGING_LABEL || 'Pakistan staging'} — tuning from your PC. US production starts after Oracle is live.
+            Local dashboard view — production checks run on GitHub Actions (US). Refresh after a workflow finishes to see new data.
           </div>
         )}
         <Outlet />

@@ -77,13 +77,37 @@ export async function fetchRuntimeSettings(): Promise<RuntimeSettings> {
   }
 }
 
-export async function touchEngineHeartbeat(mode: string): Promise<void> {
+export async function touchEngineHeartbeat(
+  mode: string,
+  geo?: { country: string | null; ip: string | null; isUs: boolean }
+): Promise<void> {
   const now = new Date().toISOString();
-  await getSupabase().from('app_settings').upsert([
+  const rows: Array<{ key: string; value: unknown }> = [
     { key: 'engine_heartbeat', value: now },
     { key: 'engine_mode', value: mode },
-  ]);
+  ];
+
+  if (geo) {
+    const country = (geo.country || 'unknown').toUpperCase();
+    const place = geo.isUs
+      ? `United States (${country})`
+      : country === 'UNKNOWN'
+        ? 'Unknown location'
+        : `Outside US (${country})`;
+    rows.push(
+      { key: 'engine_geo_country', value: country },
+      { key: 'engine_geo_ip', value: geo.ip || null },
+      { key: 'engine_geo_label', value: place },
+      {
+        key: 'engine_geo_source',
+        value: mode === 'production' ? 'GitHub Actions' : 'Local test',
+      }
+    );
+  }
+
+  await getSupabase().from('app_settings').upsert(rows);
 }
+
 
 export type CheckJobType = 'load_check' | 'form_test' | 'detect_forms' | 'daily_report';
 

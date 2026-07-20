@@ -80,7 +80,12 @@ async function processPendingJobs(): Promise<void> {
 async function schedulerTick(): Promise<void> {
   const settings = await fetchRuntimeSettings();
   const mode = getDeploymentMode();
-  await touchEngineHeartbeat(isStagingMode() ? 'staging' : mode);
+  const geo = await runGeoGuard();
+  await touchEngineHeartbeat(isStagingMode() ? 'staging' : mode, {
+    country: geo.country,
+    ip: geo.ip,
+    isUs: geo.isUs,
+  });
 
   await processPendingJobs();
 
@@ -92,7 +97,6 @@ async function schedulerTick(): Promise<void> {
   if (loadDue) {
     console.log('\n=== Scheduled load-check run ===');
     try {
-      const geo = await runGeoGuard();
       await runAllLoadChecks({ geo });
       lastLoadRun = Date.now();
     } catch (err) {

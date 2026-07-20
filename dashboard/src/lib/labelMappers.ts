@@ -56,9 +56,9 @@ export function healthReasons(checks: LoadCheck[], slowThresholdMs = 8000): stri
     if (!c.loaded || (c.status_code ?? 0) >= 400) {
       reasons.push(`${profileLabel(c.profile)}: site did not load`);
     } else if (c.elements_ok?.cta === false) {
-      reasons.push(`${profileLabel(c.profile)}: CTA missing`);
+      reasons.push(`${profileLabel(c.profile)}: Get a Quote button not found`);
     } else if (c.elements_ok?.quote_form === false) {
-      reasons.push(`${profileLabel(c.profile)}: quote form missing`);
+      reasons.push(`${profileLabel(c.profile)}: quote form not found`);
     } else if ((c.load_ms ?? 0) > slowThresholdMs) {
       reasons.push(`${profileLabel(c.profile)}: slow (${c.load_ms}ms)`);
     }
@@ -95,7 +95,7 @@ export function incidentTypeLabel(type: string): string {
 export function passLabel(v: boolean | null): string {
   if (v === true) return 'Pass';
   if (v === false) return 'Fail';
-  return 'Not checked';
+  return 'Skipped';
 }
 
 export function formLayerLabels(test: FormTest): {
@@ -112,18 +112,36 @@ export function formLayerLabels(test: FormTest): {
 
 export function formTestSummary(test: FormTest): string {
   const parts: string[] = [];
-  if (test.layer1_pass === true) parts.push('Submitted');
-  else if (test.layer1_pass === false) parts.push('Submit failed');
-  else parts.push('Submit not checked');
 
-  if (test.layer2_pass === true) parts.push('Email received');
-  else if (test.layer2_pass === false) parts.push('Email missing');
-  else if (test.layer2_pass === null) parts.push('Email not checked');
+  // Layer 1 — did the quote form submit and show a thank-you page?
+  if (test.layer1_pass === true) parts.push('Form submitted OK');
+  else if (test.layer1_pass === false) parts.push('Form submit failed');
+
+  // Layer 2 — did the lead email arrive? (only when inbox checking is turned on)
+  if (test.layer2_pass === true) parts.push('Lead email received');
+  else if (test.layer2_pass === false) parts.push('Lead email missing');
 
   if (test.logo_upload_ok === false) parts.push('Logo upload failed');
-  else if (test.logo_upload_ok === true) parts.push('Logo uploaded');
+  else if (test.logo_upload_ok === true) parts.push('Logo uploaded OK');
 
-  return parts.join(' · ');
+  return parts.length ? parts.join(' · ') : 'Form test incomplete';
+}
+
+/** Short plain-English explainers for form layer results (for tooltips / detail). */
+export function formLayerExplainer(layer: 'submit' | 'email' | 'crm', value: boolean | null): string {
+  if (layer === 'submit') {
+    if (value === true) return 'The form filled and submitted, and a thank-you / confirmation appeared.';
+    if (value === false) return 'The form did not submit successfully (no thank-you page in time).';
+    return 'Submit step was not completed in this run.';
+  }
+  if (layer === 'email') {
+    if (value === true) return 'The lead notification email arrived in the test inbox.';
+    if (value === false) return 'Expected lead email did not arrive in time.';
+    return 'Inbox checking is off — we do not look for the email yet (optional Layer 2).';
+  }
+  if (value === true) return 'CRM check passed.';
+  if (value === false) return 'CRM check failed.';
+  return 'CRM check is not connected yet (optional Layer 3).';
 }
 
 export function formTestPassed(test: FormTest): boolean {

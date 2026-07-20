@@ -11,8 +11,15 @@ import {
   healthSortOrder,
   profileLabel,
 } from '../lib/labelMappers';
-import { engineOnline, loadBeaconSettings } from '../lib/operations';
-import { formatRelativeTime, TIME_LABEL } from '../lib/time';
+import { engineOnline, loadBeaconSettings, type BeaconSettings } from '../lib/operations';
+import {
+  formatCountdown,
+  formatPakistanTime,
+  formatRelativeTime,
+  getNextFormTestAt,
+  getNextLoadCheckAt,
+  TIME_LABEL,
+} from '../lib/time';
 import type { FormTest, Health, Incident, LoadCheck, Site } from '../lib/types';
 
 type SiteSummary = {
@@ -72,6 +79,65 @@ function effectiveHealth(summary: SiteSummary): Health {
   return summary.health;
 }
 
+function NextRunTimers({
+  settings,
+  geoLabel,
+  geoIp,
+  geoSource,
+}: {
+  settings: BeaconSettings | null;
+  geoLabel: string | null;
+  geoIp: string | null;
+  geoSource: string | null;
+}) {
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const nextLoad = getNextLoadCheckAt(now);
+  const nextForm = getNextFormTestAt(
+    settings?.formTestTimesEastern || ['00:00', '06:00', '12:00', '18:00'],
+    now
+  );
+
+  return (
+    <section className="next-run-panel" aria-live="polite">
+      <div className="next-run-card">
+        <span className="next-run-label">Next load check</span>
+        <strong className="next-run-countdown">{formatCountdown(nextLoad, now)}</strong>
+        <span className="next-run-when">
+          {formatPakistanTime(nextLoad.toISOString())} {TIME_LABEL} · every 30 min (GitHub)
+        </span>
+      </div>
+      <div className="next-run-card">
+        <span className="next-run-label">Next form test</span>
+        <strong className="next-run-countdown">
+          {nextForm ? formatCountdown(nextForm, now) : '—'}
+        </strong>
+        <span className="next-run-when">
+          {nextForm
+            ? `${formatPakistanTime(nextForm.toISOString())} ${TIME_LABEL} · 4× daily`
+            : 'Schedule not set'}
+        </span>
+      </div>
+      <div className="next-run-card location-card">
+        <span className="next-run-label">Checks run from</span>
+        <strong className="next-run-countdown location-text">
+          {geoLabel || 'Waiting for first GitHub run'}
+        </strong>
+        <span className="next-run-when">
+          {geoIp
+            ? `IP ${geoIp}${geoSource ? ` · ${geoSource}` : ''}`
+            : 'Location is recorded at the start of each US workflow'}
+        </span>
+      </div>
+    </section>
+  );
+}
+
 export function Overview() {
   const [sites, setSites] = useState<Site[]>([]);
   const [checks, setChecks] = useState<LoadCheck[]>([]);
@@ -79,6 +145,10 @@ export function Overview() {
   const [formTests, setFormTests] = useState<FormTest[]>([]);
   const [heartbeat, setHeartbeat] = useState<string | null>(null);
   const [engineMode, setEngineMode] = useState<string | null>(null);
+  const [settings, setSettings] = useState<BeaconSettings | null>(null);
+  const [geoLabel, setGeoLabel] = useState<string | null>(null);
+  const [geoIp, setGeoIp] = useState<string | null>(null);
+  const [geoSource, setGeoSource] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -90,7 +160,7 @@ export function Overview() {
         { data: checkRows, error: cErr },
         { data: incRows },
         { data: formRows },
-        settings,
+        loaded,
       ] = await Promise.all([
         supabase.from('sites').select('*').order('name'),
         supabase
@@ -109,7 +179,15 @@ export function Overview() {
           .select('*')
           .order('tested_at', { ascending: false })
           .limit(200),
-        loadBeaconSettings().catch(() => ({ heartbeat: null, engineMode: null })),
+        loadBeaconSettings().catch(() => ({
+          settings: null as unknown as BeaconSettings,
+          heartbeat: null,
+          engineMode: null,
+          geoCountry: null,
+          geoIp: null,
+          geoLabel: null,
+          geoSource: null,
+        })),
       ]);
       if (cancelled) return;
       if (sErr || cErr) {
@@ -120,8 +198,12 @@ export function Overview() {
       setChecks((checkRows || []) as LoadCheck[]);
       setIncidents((incRows || []) as Incident[]);
       setFormTests((formRows || []) as FormTest[]);
-      setHeartbeat(settings.heartbeat);
-      setEngineMode(settings.engineMode);
+      setHeartbeat(loaded.heartbeat);
+      setEngineMode(loaded.engineMode);
+      setSettings(loaded.settings ?? null);
+      setGeoLabel(loaded.geoLabel);
+      setGeoIp(loaded.geoIp);
+      setGeoSource(loaded.geoSource);
       setError(null);
     }
     void load();
@@ -168,6 +250,13 @@ export function Overview() {
 
       {error && <p className="error">{error}</p>}
 
+      <NextRunTimers
+        settings={settings}
+        geoLabel={geoLabel}
+        geoIp={geoIp}
+        geoSource={geoSource}
+      />
+
       <section className="fleet-summary">
         <div className="summary-stat">
           <strong>{sites.length}</strong>
@@ -189,8 +278,8 @@ export function Overview() {
           <strong>{online ? 'Online' : 'Offline'}</strong>
           <span>
             {online
-              ? `Engine · ${engineMode || 'staging'} · ${formatRelativeTime(heartbeat)}`
-              : 'Start npm start in d:\\bots'}
+              ? `GitHub Actions · ${engineMode || 'production'} · ${formatRelativeTime(heartbeat)}`
+              : 'Waiting for next GitHub Actions run (every 30 min)'}
           </span>
         </div>
       </section>
@@ -240,6 +329,9 @@ function SiteCard({ summary }: { summary: SiteSummary }) {
   const health = effectiveHealth(summary);
   const { site, reasons, lastCheck, openIncidents, latestForm, desktopLoadMs } = summary;
 
+  const formNote =
+    latestForm && !formTestPassed(latestForm) ? formTestSummary(latestForm) : '';
+
   return (
     <article className={`status-card health-${health} enriched`}>
       <header>
@@ -285,7 +377,10 @@ function SiteCard({ summary }: { summary: SiteSummary }) {
       </ul>
 
       {health !== 'green' && (
-        <p className="card-reason">{reasons[0]}{latestForm && !formTestPassed(latestForm) ? ` · ${formTestSummary(latestForm)}` : ''}</p>
+        <p className="card-reason">
+          {reasons[0]}
+          {formNote ? ` · ${formNote}` : ''}
+        </p>
       )}
 
       <p className="meta">

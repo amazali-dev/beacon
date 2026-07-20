@@ -132,3 +132,52 @@ export function sinceIso(hours: number): string {
 export function sinceDays(days: number): string {
   return sinceIso(days * 24);
 }
+
+/** Next GitHub Actions load-check slot (cron every 30 minutes on the hour / half-hour UTC). */
+export function getNextLoadCheckAt(from = new Date()): Date {
+  const d = new Date(from);
+  d.setUTCSeconds(0, 0);
+  d.setUTCMilliseconds(0);
+  const mins = d.getUTCMinutes();
+  if (mins < 30) {
+    d.setUTCMinutes(30);
+  } else {
+    d.setUTCMinutes(0);
+    d.setUTCHours(d.getUTCHours() + 1);
+  }
+  if (d.getTime() <= from.getTime()) {
+    d.setTime(d.getTime() + 30 * 60_000);
+  }
+  return d;
+}
+
+/** Next form-test slot from a list of HH:MM times in US Eastern. */
+export function getNextFormTestAt(
+  easternTimes: string[],
+  from = new Date()
+): Date | null {
+  if (!easternTimes.length) return null;
+  let best: Date | null = null;
+  for (let dayOffset = 0; dayOffset <= 1; dayOffset++) {
+    const ref = new Date(from.getTime() + dayOffset * 24 * 60 * 60 * 1000);
+    for (const hm of easternTimes) {
+      const candidate = wallClockToDate(hm, EASTERN_TZ, ref);
+      if (candidate.getTime() <= from.getTime()) continue;
+      if (!best || candidate.getTime() < best.getTime()) best = candidate;
+    }
+  }
+  return best;
+}
+
+/** Live countdown text like "12m 40s" or "Due now". */
+export function formatCountdown(target: Date, now = new Date()): string {
+  const ms = target.getTime() - now.getTime();
+  if (ms <= 0) return 'Due now';
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${String(s).padStart(2, '0')}s`;
+  return `${s}s`;
+}

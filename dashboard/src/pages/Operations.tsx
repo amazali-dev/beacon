@@ -111,7 +111,9 @@ export function Operations() {
     setError(null);
     try {
       await queueJob(jobType);
-      setMessage(`"${label}" queued — keep npm start running in d:\\bots.`);
+      setMessage(
+        `"${label}" queued in Supabase. For production, use GitHub Actions → Load checks → Run workflow (local queue only works if npm start is running).`
+      );
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not queue job');
@@ -141,8 +143,8 @@ export function Operations() {
             <strong>{online ? 'Engine running' : 'Engine not detected'}</strong>
             <p className="meta">
               {online
-                ? `Last seen ${formatPakistanTime(heartbeat)} ${TIME_LABEL} · ${engineMode || 'staging'} mode`
-                : 'Run cd d:\\bots then npm start — leave that window open.'}
+                ? `Last seen ${formatPakistanTime(heartbeat)} ${TIME_LABEL} · ${engineMode || 'production'} mode`
+                : 'No recent GitHub Actions heartbeat yet — run Load checks once from the Actions tab.'}
             </p>
           </div>
         </div>
