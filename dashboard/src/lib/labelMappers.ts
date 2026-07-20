@@ -160,6 +160,6 @@ export function detectionStatusLabel(site: {
 }): string {
   if (!site.form_testing_enabled) return 'Form testing off';
   const keys = Object.keys(site.form_selectors || {});
-  if (keys.length >= 3) return 'Form fields detected';
-  return 'Needs field detection';
+  if (keys.length >= 3) return 'Form test fields ready';
+  return 'Needs form field detection';
 }

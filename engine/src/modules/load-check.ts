@@ -109,15 +109,21 @@ async function checkElements(
   result.headline = siteSelectors.headline
     ? await elementPresent(page, siteSelectors.headline)
     : await elementPresent(page, DEFAULT_SELECTORS.headline);
-  result.cta = await checkCta(page, siteSelectors);
 
-  if (formExpectedOnMainPage(site)) {
+  const formOnThisPage = formExpectedOnMainPage(site);
+
+  if (formOnThisPage) {
+    // Main URL is the form page (or form URL not set separately).
     result.quote_form = siteSelectors.quote_form
       ? await elementPresent(page, siteSelectors.quote_form)
       : await elementPresent(page, DEFAULT_SELECTORS.quote_form);
+    // Already on the form — do NOT require a separate "Get a Quote" button.
+    result.cta = true;
   } else {
-    // Form lives on quote_form_url — Module 2 (form tests) checks it there.
+    // Homepage + separate quote form URL: only need the Get a Quote CTA here.
+    // The form itself is checked by Module 2 on quote_form_url.
     result.quote_form = true;
+    result.cta = await checkCta(page, siteSelectors);
   }
 
   return result;
@@ -246,12 +252,16 @@ export async function runLoadCheckForSiteProfile(
       notes = err instanceof Error ? err.message : String(err);
     }
 
-    const missingCritical = elementsOk.cta === false;
+    // Critical only for what this page is supposed to have:
+    // - separate form URL → homepage needs CTA
+    // - form on this page → needs the form (CTA not required)
+    const missingCritical = formExpectedOnMainPage(site)
+      ? elementsOk.quote_form === false
+      : elementsOk.cta === false;
     const failed =
       !loaded ||
       (statusCode !== null && statusCode >= 400) ||
-      missingCritical ||
-      (formExpectedOnMainPage(site) && elementsOk.quote_form === false);
+      missingCritical;
 
     if (failed) {
       screenshotPath = await captureFailureScreenshot(
@@ -281,8 +291,9 @@ export async function runLoadCheckForSiteProfile(
     failed:
       !loaded ||
       (statusCode !== null && statusCode >= 400) ||
-      elementsOk.cta === false ||
-      (formExpectedOnMainPage(site) && elementsOk.quote_form === false),
+      (formExpectedOnMainPage(site)
+        ? elementsOk.quote_form === false
+        : elementsOk.cta === false),
   };
 
   await insertLoadCheck({
@@ -322,11 +333,11 @@ export async function runLoadCheckForSiteProfile(
     await closeIncident(site.id, 'load_failure');
   }
 
-  if (result.elementsOk.cta === false) {
+  if (!formExpectedOnMainPage(site) && result.elementsOk.cta === false) {
     const id = await openIncident({
       site_id: site.id,
       type: 'missing_element',
-      detail: `${site.name} [${profile}] Get a Quote button/link not found on homepage. elements=${JSON.stringify(result.elementsOk)}`,
+      detail: `${site.name} [${profile}] Get a Quote button/link not found on homepage (form is on a separate URL). elements=${JSON.stringify(result.elementsOk)}`,
       screenshot_path: result.screenshotPath,
     });
     await maybeSendAlert({
@@ -345,7 +356,7 @@ export async function runLoadCheckForSiteProfile(
     const id = await openIncident({
       site_id: site.id,
       type: 'missing_element',
-      detail: `${site.name} [${profile}] quote form expected on homepage but not found. elements=${JSON.stringify(result.elementsOk)}`,
+      detail: `${site.name} [${profile}] quote form expected on this page but not found. elements=${JSON.stringify(result.elementsOk)}`,
       screenshot_path: result.screenshotPath,
     });
     await maybeSendAlert({
@@ -353,7 +364,7 @@ export async function runLoadCheckForSiteProfile(
       siteId: site.id,
       siteName: site.name,
       type: 'missing_element',
-      detail: `${site.name} [${profile}] is missing the quote form on the homepage.`,
+      detail: `${site.name} [${profile}] is missing the quote form on the monitored page.`,
       screenshotPath: result.screenshotPath,
       cooldownHours: config.alertCooldownHours,
     });
