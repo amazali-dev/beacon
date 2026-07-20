@@ -84,4 +84,6 @@ jobs:
           IMAP_PASS: ${{ secrets.IMAP_PASS }}
           # Leave PROXY_URL secret empty (or unset) to go direct from the runner
           PROXY_URL: ${{ secrets.PROXY_URL }}
+          PROXY_USERNAME: ${{ secrets.PROXY_USERNAME }}
+          PROXY_PASSWORD: ${{ secrets.PROXY_PASSWORD }}
         run: npm run check:once
