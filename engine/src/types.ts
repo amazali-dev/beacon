@@ -53,8 +53,10 @@ export interface EngineConfig {
   delayMsBetweenProfiles?: number;
   /** Extra pause after a 429/503 before the next check */
   delayMsAfterRateLimit?: number;
-  /** How many times to retry page open on 429/503 (keep low — retries make rate limits worse) */
+  /** How many times to retry page open on 429/503 (1 = no retry — fail fast) */
   gotoMaxAttempts?: number;
+  /** Stop the whole load-check run after this many 429/503 in a row */
+  abortAfterConsecutiveRateLimits?: number;
   /** staging = local NON-US test runs; production = GitHub Actions US runners */
   deploymentMode: 'staging' | 'production';
   stagingLabel: string;

@@ -455,12 +455,13 @@ export async function runAllLoadChecks(opts: {
   );
 
   const cfg = loadConfig();
-  const betweenChecks = cfg.delayMsBetweenChecks ?? 18000;
-  const betweenProfiles = cfg.delayMsBetweenProfiles ?? 45000;
-  const afterRateLimit = cfg.delayMsAfterRateLimit ?? 60000;
+  const betweenChecks = cfg.delayMsBetweenChecks ?? 12000;
+  const betweenProfiles = cfg.delayMsBetweenProfiles ?? 20000;
+  const afterRateLimit = cfg.delayMsAfterRateLimit ?? 8000;
+  const abortAfter = cfg.abortAfterConsecutiveRateLimits ?? 3;
+  let consecutiveRateLimits = 0;
 
   // Profile outer loop: hit each site less often (desktop all sites → pause → Safari → …)
-  // so the same CDN is not hit 3× in a few seconds.
   for (let pi = 0; pi < profiles.length; pi++) {
     const profile = profiles[pi];
     for (const site of sites) {
@@ -498,10 +499,27 @@ export async function runAllLoadChecks(opts: {
           check_ip: opts.geo.ip,
         });
       }
+
+      if (statusCode === 429 || statusCode === 503) {
+        consecutiveRateLimits += 1;
+        console.log(
+          `  rate-limit streak ${consecutiveRateLimits}/${abortAfter}`
+        );
+        if (consecutiveRateLimits >= abortAfter) {
+          console.warn(
+            `\n!!! ABORTING LOAD CHECKS — CDN rate-limited ${abortAfter} checks in a row. ` +
+              `Stopping so this job does not run for 30+ minutes. Try again later or set PROXY_URL.\n`
+          );
+          return;
+        }
+      } else if (statusCode !== null && statusCode >= 200 && statusCode < 400) {
+        consecutiveRateLimits = 0;
+      }
+
       const pause =
         statusCode === 429 || statusCode === 503
           ? afterRateLimit
-          : betweenChecks + Math.floor(Math.random() * 4000);
+          : betweenChecks + Math.floor(Math.random() * 3000);
       console.log(`  pausing ${Math.round(pause / 1000)}s before next check…`);
       await sleep(pause);
     }

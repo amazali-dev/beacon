@@ -19,9 +19,10 @@ function retryAfterMs(response: Response | null, attempt: number): number {
   const header = response?.headers()?.['retry-after'];
   const parsed = header ? Number(header) * 1000 : NaN;
   if (Number.isFinite(parsed)) {
-    return Math.min(120_000, Math.max(20_000, parsed));
+    return Math.min(45_000, Math.max(8_000, parsed));
   }
-  return Math.min(90_000, 30_000 * 2 ** (attempt - 1));
+  // Keep short — long waits turn one blocked run into a 30+ minute job
+  return Math.min(20_000, 8_000 * attempt);
 }
 
 export async function gotoWithRetries(

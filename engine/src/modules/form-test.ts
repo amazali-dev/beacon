@@ -54,7 +54,7 @@ export async function runFormTestForSite(
   site: SiteRow,
   geo: GeoGuardResult,
   opts?: { headed?: boolean }
-): Promise<void> {
+): Promise<{ rateLimited: boolean; ok: boolean }> {
   const config = loadConfig();
   const identity = getTestIdentity(config);
   const runId = buildRunId();
@@ -72,7 +72,7 @@ export async function runFormTestForSite(
 
   if (!site.form_testing_enabled) {
     console.log(`  Form testing disabled for ${site.name} — skipped.`);
-    return;
+    return { rateLimited: false, ok: true };
   }
 
   const siteReady = await ensureFormSelectors(site);
@@ -288,6 +288,11 @@ export async function runFormTestForSite(
   if (notes.length) {
     console.log(`  Notes: ${notes.join(' | ')}`);
   }
+
+  return {
+    rateLimited,
+    ok: layer1 === true,
+  };
 }
 
 export async function runAllFormTests(opts: {
@@ -303,17 +308,31 @@ export async function runAllFormTests(opts: {
     return;
   }
 
-  const pauseMs = loadConfig().delayMsBetweenChecks ?? 18000;
-  // Cool down before forms so a just-finished load-check burst does not 429 the first site
-  console.log(`Form tests: waiting 45s before first site to avoid CDN rate limits…`);
-  await sleep(45_000);
+  const pauseMs = loadConfig().delayMsBetweenChecks ?? 12000;
+  const abortAfter = loadConfig().abortAfterConsecutiveRateLimits ?? 3;
+  let consecutiveRateLimits = 0;
+
+  console.log(`Form tests: waiting 20s before first site…`);
+  await sleep(20_000);
 
   for (let i = 0; i < sites.length; i++) {
     const site = sites[i]!;
     console.log(`→ Form test ${site.name}…`);
-    await runFormTestForSite(site, opts.geo, { headed: opts.headed });
+    const result = await runFormTestForSite(site, opts.geo, { headed: opts.headed });
+    if (result.rateLimited) {
+      consecutiveRateLimits += 1;
+      console.log(`  form rate-limit streak ${consecutiveRateLimits}/${abortAfter}`);
+      if (consecutiveRateLimits >= abortAfter) {
+        console.warn(
+          `\n!!! ABORTING FORM TESTS — CDN rate-limited ${abortAfter} sites in a row. Stopping early.\n`
+        );
+        return;
+      }
+    } else if (result.ok) {
+      consecutiveRateLimits = 0;
+    }
     if (i < sites.length - 1) {
-      const gap = pauseMs + 20_000;
+      const gap = pauseMs + 10_000;
       console.log(`  pausing ${Math.round(gap / 1000)}s before next form site…`);
       await sleep(gap);
     }
