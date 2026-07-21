@@ -19,7 +19,7 @@ export function Layout() {
   const [openIncidents, setOpenIncidents] = useState(0);
   const [sites, setSites] = useState<Pick<Site, 'id' | 'name' | 'main_url' | 'active'>[]>([]);
   const location = useLocation();
-  const buildSha = import.meta.env.VITE_COMMIT_SHA?.slice(0, 7) || 'untracked';
+  const appVersion = import.meta.env.VITE_APP_VERSION || '1.0.0';
 
   useEffect(() => {
     const t = setInterval(() => setClock(nowPakistanClock()), 30_000);
@@ -89,9 +89,6 @@ export function Layout() {
             <span aria-hidden="true">↻</span>
             Refresh
           </button>
-          <span className="clock" title="Dashboard deployed commit">
-            Build {buildSha}
-          </span>
           <span className="clock" title={`Pakistan time (${TIME_LABEL})`}>
             {clock} {TIME_LABEL}
           </span>
@@ -170,6 +167,13 @@ export function Layout() {
               <b aria-hidden>→</b>
             </NavLink>
           </div>
+
+          <footer className="sidebar-version" title={`Beacon ${appVersion}`}>
+            <span className="sidebar-version-mark" aria-hidden />
+            <span>
+              <strong>Beacon v{appVersion}</strong>
+            </span>
+          </footer>
         </aside>
 
         <main className="main">

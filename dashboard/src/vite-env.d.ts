@@ -5,6 +5,7 @@ interface ImportMetaEnv {
   readonly VITE_SUPABASE_ANON_KEY: string;
   readonly VITE_BEACON_ENV?: string;
   readonly VITE_STAGING_LABEL?: string;
+  readonly VITE_APP_VERSION?: string;
 }
 
 interface ImportMeta {
