@@ -17,6 +17,7 @@ import {
   incidentTypeLabel,
   profileLabel,
 } from '../lib/labelMappers';
+import { isRateLimitedFormTest } from '../lib/healthScoring';
 import { formatPakistanTime, formatRelativeTime, sinceDays, TIME_LABEL } from '../lib/time';
 import type { FormTest, Incident, LoadCheck, Site } from '../lib/types';
 
@@ -60,9 +61,11 @@ export function SiteDetail() {
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [chartRange, setChartRange] = useState<'24h' | '7d'>('24h');
   const [formFilter, setFormFilter] = useState<'all' | 'pass' | 'fail'>('all');
+  const [formRateLimitedOnly, setFormRateLimitedOnly] = useState(false);
   const [formQuery, setFormQuery] = useState('');
   const [visitProfile, setVisitProfile] = useState<'all' | string>('all');
   const [visitFilter, setVisitFilter] = useState<'all' | 'ok' | 'fail' | 'slow'>('all');
+  const [visitRateLimitedOnly, setVisitRateLimitedOnly] = useState(false);
   const [showClosedIncidents, setShowClosedIncidents] = useState(false);
   const [modal, setModal] = useState<{ src: string; alt: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -134,26 +137,26 @@ export function SiteDetail() {
   const filteredForms = useMemo(() => {
     const q = formQuery.trim().toLowerCase();
     return formTests.filter((f) => {
-      if (formFilter === 'pass' && !formTestPassed(f)) return false;
-      if (formFilter === 'fail' && formTestPassed(f)) return false;
+      const rateLimited = isRateLimitedFormTest(f);
+      if (formRateLimitedOnly ? !rateLimited : rateLimited) return false;
+      if (formFilter === 'pass' && (rateLimited || !formTestPassed(f))) return false;
+      if (formFilter === 'fail' && (rateLimited || formTestPassed(f))) return false;
       if (q && !`${f.run_id} ${f.notes || ''}`.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [formTests, formFilter, formQuery]);
+  }, [formTests, formFilter, formQuery, formRateLimitedOnly]);
 
   const filteredVisits = useMemo(() => {
     return checks.filter((c) => {
       if (visitProfile !== 'all' && c.profile !== visitProfile) return false;
+      if (visitRateLimitedOnly ? c.status_code !== 429 : c.status_code === 429) return false;
       const badge = loadCheckBadge(c);
       if (visitFilter === 'ok' && badge !== 'ok') return false;
-      if (visitFilter === 'fail' && badge !== 'bad' && c.status_code !== 429) {
-        return false;
-      }
-      if (visitFilter === 'fail' && badge === 'ok') return false;
+      if (visitFilter === 'fail' && badge !== 'bad') return false;
       if (visitFilter === 'slow' && !((c.load_ms ?? 0) > 8000 && c.loaded)) return false;
       return true;
     });
-  }, [checks, visitProfile, visitFilter]);
+  }, [checks, visitProfile, visitFilter, visitRateLimitedOnly]);
 
   function setTab(id: string) {
     setParams({ tab: id });
@@ -298,13 +301,26 @@ export function SiteDetail() {
               Result
               <select
                 value={visitFilter}
-                onChange={(e) => setVisitFilter(e.target.value as 'all' | 'ok' | 'fail' | 'slow')}
+                onChange={(e) =>
+                  setVisitFilter(e.target.value as 'all' | 'ok' | 'fail' | 'slow')
+                }
               >
                 <option value="all">All</option>
                 <option value="ok">Healthy</option>
                 <option value="slow">Slow</option>
-                <option value="fail">Failed / limited</option>
+                <option value="fail">Failed</option>
               </select>
+            </label>
+            <label className="filter-checkbox">
+              <input
+                type="checkbox"
+                checked={visitRateLimitedOnly}
+                onChange={(e) => {
+                  setVisitRateLimitedOnly(e.target.checked);
+                  if (e.target.checked) setVisitFilter('all');
+                }}
+              />
+              Rate limited only
             </label>
           </div>
           <div className="table-wrap">
@@ -377,6 +393,17 @@ export function SiteDetail() {
                 <option value="fail">Failed</option>
               </select>
             </label>
+            <label className="filter-checkbox">
+              <input
+                type="checkbox"
+                checked={formRateLimitedOnly}
+                onChange={(e) => {
+                  setFormRateLimitedOnly(e.target.checked);
+                  if (e.target.checked) setFormFilter('all');
+                }}
+              />
+              Rate limited only
+            </label>
           </div>
           <div className="table-wrap">
             <table>
@@ -402,7 +429,17 @@ export function SiteDetail() {
                     </td>
                     <td className="notes-cell">{formatRunLocation(f)}</td>
                     <td>
-                      <span className={`badge ${formTestPassed(f) ? 'ok' : f.layer1_pass === false ? 'bad' : 'muted'}`}>
+                      <span
+                        className={`badge ${
+                          isRateLimitedFormTest(f)
+                            ? 'muted'
+                            : formTestPassed(f)
+                              ? 'ok'
+                              : f.layer1_pass === false
+                                ? 'bad'
+                                : 'muted'
+                        }`}
+                      >
                         {formTestSummary(f)}
                       </span>
                     </td>

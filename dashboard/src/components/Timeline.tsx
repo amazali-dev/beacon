@@ -7,6 +7,7 @@ import {
   incidentTypeLabel,
   profileLabel,
 } from '../lib/labelMappers';
+import { isRateLimitedFormTest } from '../lib/healthScoring';
 import { formatPakistanTime, formatRelativeTime, sinceDays, TIME_LABEL } from '../lib/time';
 import { ScreenshotThumb } from './ScreenshotModal';
 
@@ -20,6 +21,7 @@ export type TimelineEvent = {
   detail: string;
   location: string | null;
   status: 'ok' | 'bad' | 'muted';
+  rateLimited: boolean;
   screenshot_path: string | null;
 };
 
@@ -63,12 +65,14 @@ function buildEvents(
             : `Loaded in ${c.load_ms ?? '?'}ms`,
       location: formatRunLocation(c),
       status: bad ? 'bad' : warn ? 'muted' : 'ok',
+      rateLimited,
       screenshot_path: c.screenshot_path,
     });
   }
 
   for (const f of formTests) {
-    const failed = f.layer1_pass === false || f.layer2_pass === false;
+    const rateLimited = isRateLimitedFormTest(f);
+    const failed = !rateLimited && (f.layer1_pass === false || f.layer2_pass === false);
     events.push({
       id: `form-${f.id}`,
       type: 'form',
@@ -77,6 +81,7 @@ function buildEvents(
       detail: f.notes ? `${formTestSummary(f)} — ${f.notes}` : formTestSummary(f),
       location: formatRunLocation(f),
       status: failed ? 'bad' : f.layer1_pass === true ? 'ok' : 'muted',
+      rateLimited,
       screenshot_path: f.screenshot_path,
     });
   }
@@ -90,6 +95,7 @@ function buildEvents(
       detail: incidentDetailPlain(i),
       location: null,
       status: i.closed_at ? 'muted' : 'bad',
+      rateLimited: i.type === 'rate_limited',
       screenshot_path: i.screenshot_path,
     });
     if (i.closed_at) {
@@ -101,6 +107,7 @@ function buildEvents(
         detail: incidentDetailPlain(i),
         location: null,
         status: 'ok',
+        rateLimited: i.type === 'rate_limited',
         screenshot_path: i.screenshot_path,
       });
     }
@@ -115,6 +122,7 @@ export function Timeline({ loadChecks, formTests, incidents, onOpenScreenshot }:
   );
   const [timeframe, setTimeframe] = useState<Timeframe>('7d');
   const [query, setQuery] = useState('');
+  const [rateLimitedOnly, setRateLimitedOnly] = useState(false);
 
   const allEvents = useMemo(
     () => buildEvents(loadChecks, formTests, incidents),
@@ -134,13 +142,14 @@ export function Timeline({ loadChecks, formTests, incidents, onOpenScreenshot }:
 
     return allEvents.filter((e) => {
       if (!types.has(e.type)) return false;
+      if (rateLimitedOnly ? !e.rateLimited : e.rateLimited) return false;
       if (since && e.timestamp < since) return false;
       if (q && !`${e.title} ${e.detail} ${e.location || ''}`.toLowerCase().includes(q)) {
         return false;
       }
       return true;
     });
-  }, [allEvents, types, timeframe, query]);
+  }, [allEvents, types, timeframe, query, rateLimitedOnly]);
 
   function toggleType(t: TimelineEventType) {
     setTypes((prev) => {
@@ -183,6 +192,14 @@ export function Timeline({ loadChecks, formTests, incidents, onOpenScreenshot }:
             </button>
           ))}
         </div>
+        <label className="filter-checkbox">
+          <input
+            type="checkbox"
+            checked={rateLimitedOnly}
+            onChange={(event) => setRateLimitedOnly(event.target.checked)}
+          />
+          Rate limited only
+        </label>
       </div>
 
       <ol className="timeline-list">
