@@ -39,6 +39,7 @@ const RANGES: Array<{ days: ReportRangeDays; label: string }> = [
 ];
 
 const EVIDENCE_PAGE_SIZE = 18;
+type ReportView = 'visits' | 'forms' | 'both';
 
 function percent(value: number | null): string {
   return value === null ? '—' : `${value.toFixed(value % 1 ? 1 : 0)}%`;
@@ -77,68 +78,97 @@ function MetricCard({
   );
 }
 
-function ReportMetricsGrid({ metrics }: { metrics: ReportMetrics }) {
+function ReportMetricsGrid({
+  metrics,
+  view,
+}: {
+  metrics: ReportMetrics;
+  view: ReportView;
+}) {
   const decidedForms = metrics.successfulForms + metrics.failedForms;
 
   return (
     <section className="report-metrics" aria-label="Report summary">
-      <MetricCard
-        label="Overall health"
-        value={percent(metrics.healthPercent)}
-        detail="Weighted availability, content, performance and browser score"
-        tone={healthTone(metrics.healthPercent)}
-      />
-      <MetricCard
-        label="Total visits"
-        value={metrics.totalVisits.toLocaleString()}
-        detail={`${metrics.failedVisits.toLocaleString()} unsuccessful · ${metrics.rateLimitedVisits.toLocaleString()} rate-limited`}
-      />
-      <MetricCard
-        label="Average load"
-        value={duration(metrics.averageLoadMs)}
-        detail={`P95 ${duration(metrics.p95LoadMs)} · fastest ${duration(metrics.fastestLoadMs)}`}
-        tone={
-          metrics.averageLoadMs === null
-            ? 'gray'
-            : metrics.averageLoadMs <= 4000
-              ? 'green'
-              : metrics.averageLoadMs <= 8000
-                ? 'yellow'
-                : 'red'
-        }
-      />
-      <MetricCard
-        label="Form health"
-        value={percent(metrics.formHealthPercent)}
-        detail={`${metrics.successfulForms} submitted of ${decidedForms} completed attempts · ${metrics.skippedForms} skipped`}
-        tone={healthTone(metrics.formHealthPercent)}
-      />
-      <MetricCard
-        label="Slow visits"
-        value={metrics.slowVisits.toLocaleString()}
-        detail="Successful visits slower than 8 seconds"
-        tone={metrics.slowVisits === 0 ? 'green' : 'yellow'}
-      />
-      <MetricCard
-        label="Content checks"
-        value={metrics.contentIssueVisits.toLocaleString()}
-        detail="Visits where a required CTA or form was not found"
-        tone={metrics.contentIssueVisits === 0 ? 'green' : 'yellow'}
-      />
-      <MetricCard
-        label="Monitor confidence"
-        value={percent(metrics.monitorConfidencePercent)}
-        detail={`${metrics.websiteHealth.confidenceLabel} confidence · ${metrics.websiteHealth.observedProfiles}/${metrics.websiteHealth.expectedProfiles} browsers assessed`}
-        tone={
-          metrics.websiteHealth.confidenceLabel === 'High'
-            ? 'green'
-            : metrics.websiteHealth.confidenceLabel === 'Moderate'
-              ? 'yellow'
-              : metrics.websiteHealth.confidenceLabel === 'Low'
-                ? 'red'
-                : 'gray'
-        }
-      />
+      {view !== 'forms' && (
+        <>
+          <MetricCard
+            label="Website health"
+            value={percent(metrics.healthPercent)}
+            detail="Weighted availability, content, performance and browser score"
+            tone={healthTone(metrics.healthPercent)}
+          />
+          <MetricCard
+            label="Total visits"
+            value={metrics.totalVisits.toLocaleString()}
+            detail={`${metrics.successfulVisits.toLocaleString()} successful · ${metrics.failedVisits.toLocaleString()} failed · ${metrics.rateLimitedVisits.toLocaleString()} rate-limited`}
+          />
+          <MetricCard
+            label="Average load"
+            value={duration(metrics.averageLoadMs)}
+            detail={`P95 ${duration(metrics.p95LoadMs)} · fastest ${duration(metrics.fastestLoadMs)}`}
+            tone={
+              metrics.averageLoadMs === null
+                ? 'gray'
+                : metrics.averageLoadMs <= 4000
+                  ? 'green'
+                  : metrics.averageLoadMs <= 8000
+                    ? 'yellow'
+                    : 'red'
+            }
+          />
+        </>
+      )}
+      {view !== 'visits' && (
+        <>
+          <MetricCard
+            label="Form health"
+            value={percent(metrics.formHealthPercent)}
+            detail={`${metrics.successfulForms} submitted of ${decidedForms} completed attempts`}
+            tone={healthTone(metrics.formHealthPercent)}
+          />
+          <MetricCard
+            label="Total form tests"
+            value={metrics.totalForms.toLocaleString()}
+            detail={`${metrics.successfulForms} passed · ${metrics.failedForms} failed · ${metrics.skippedForms} skipped`}
+          />
+          <MetricCard
+            label="Form success"
+            value={percent(metrics.formSuccessPercent)}
+            detail="Successful submissions among completed attempts"
+            tone={healthTone(metrics.formSuccessPercent)}
+          />
+        </>
+      )}
+      {view === 'visits' && (
+        <>
+          <MetricCard
+            label="Slow visits"
+            value={metrics.slowVisits.toLocaleString()}
+            detail="Successful visits slower than 8 seconds"
+            tone={metrics.slowVisits === 0 ? 'green' : 'yellow'}
+          />
+          <MetricCard
+            label="Content checks"
+            value={metrics.contentIssueVisits.toLocaleString()}
+            detail="Visits where a required CTA or form was not found"
+            tone={metrics.contentIssueVisits === 0 ? 'green' : 'yellow'}
+          />
+          <MetricCard
+            label="Monitor confidence"
+            value={percent(metrics.monitorConfidencePercent)}
+            detail={`${metrics.websiteHealth.confidenceLabel} confidence · ${metrics.websiteHealth.observedProfiles}/${metrics.websiteHealth.expectedProfiles} browsers assessed`}
+            tone={
+              metrics.websiteHealth.confidenceLabel === 'High'
+                ? 'green'
+                : metrics.websiteHealth.confidenceLabel === 'Moderate'
+                  ? 'yellow'
+                  : metrics.websiteHealth.confidenceLabel === 'Low'
+                    ? 'red'
+                    : 'gray'
+            }
+          />
+        </>
+      )}
     </section>
   );
 }
@@ -314,6 +344,9 @@ export function Reporting() {
   const days: ReportRangeDays = RANGES.some((range) => range.days === parsedDays)
     ? (parsedDays as ReportRangeDays)
     : 7;
+  const parsedView = params.get('type');
+  const reportView: ReportView =
+    parsedView === 'visits' || parsedView === 'forms' ? parsedView : 'both';
 
   const [data, setData] = useState<ReportData>({ sites: [], checks: [], forms: [] });
   const [loading, setLoading] = useState(true);
@@ -352,7 +385,7 @@ export function Reporting() {
 
   useEffect(() => {
     setEvidencePage(1);
-  }, [days, selectedSiteId, evidenceType]);
+  }, [days, selectedSiteId, evidenceType, reportView]);
 
   const siteById = useMemo(
     () => new Map(data.sites.map((site) => [site.id, site])),
@@ -379,6 +412,8 @@ export function Reporting() {
   );
 
   const evidence = useMemo(() => {
+    const effectiveType =
+      reportView === 'both' ? evidenceType : reportView === 'visits' ? 'visit' : 'form';
     const rows: Evidence[] = [
       ...data.checks.map(
         (row): Evidence => ({ kind: 'visit', timestamp: row.checked_at, row })
@@ -388,9 +423,9 @@ export function Reporting() {
       ),
     ];
     return rows
-      .filter((item) => evidenceType === 'all' || item.kind === evidenceType)
+      .filter((item) => effectiveType === 'all' || item.kind === effectiveType)
       .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-  }, [data.checks, data.forms, evidenceType]);
+  }, [data.checks, data.forms, evidenceType, reportView]);
 
   const evidencePages = Math.max(1, Math.ceil(evidence.length / EVIDENCE_PAGE_SIZE));
   const visibleEvidence = evidence.slice(
@@ -417,6 +452,13 @@ export function Reporting() {
     setParams(next);
   }
 
+  function setReportView(view: ReportView) {
+    const next = new URLSearchParams(params);
+    if (view === 'both') next.delete('type');
+    else next.set('type', view);
+    setParams(next);
+  }
+
   return (
     <div className="report-page">
       <header className="report-hero">
@@ -425,13 +467,13 @@ export function Reporting() {
           <h1>{selectedSite ? selectedSite.name : 'Collective report'}</h1>
           <p>
             {selectedSite
-              ? `Detailed production history for ${selectedSite.name}.`
-              : 'All monitored sites, combined into one production health report.'}
+              ? `${reportView === 'visits' ? 'Website visit' : reportView === 'forms' ? 'Form submission' : 'Combined'} production history for ${selectedSite.name}.`
+              : `${reportView === 'visits' ? 'Website visits across all monitored sites.' : reportView === 'forms' ? 'Form submissions across all monitored sites.' : 'Website visits and form submissions combined across all monitored sites.'}`}
           </p>
         </div>
         <Link
           className="report-method-link"
-          to={`/reports/methodology?days=${days}${selectedSiteId ? `&site=${encodeURIComponent(selectedSiteId)}` : ''}`}
+          to={`/reports/methodology?days=${days}${selectedSiteId ? `&site=${encodeURIComponent(selectedSiteId)}` : ''}${reportView !== 'both' ? `&type=${reportView}` : ''}`}
         >
           <span aria-hidden>ⓘ</span>
           How health is calculated
@@ -461,21 +503,35 @@ export function Reporting() {
             </button>
           ))}
         </div>
-        <label className="report-site-selector">
-          <span>Website</span>
-          <select
-            value={selectedSiteId}
-            onChange={(event) => selectSite(event.target.value)}
-            aria-label="Select website report"
-          >
-            <option value="">All websites — collective</option>
-            {data.sites.map((site) => (
-              <option key={site.id} value={site.id}>
-                {site.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="report-toolbar-selectors">
+          <label className="report-site-selector report-type-selector">
+            <span>Information</span>
+            <select
+              value={reportView}
+              onChange={(event) => setReportView(event.target.value as ReportView)}
+              aria-label="Select report information type"
+            >
+              <option value="visits">Site visits</option>
+              <option value="forms">Forms</option>
+              <option value="both">Both</option>
+            </select>
+          </label>
+          <label className="report-site-selector">
+            <span>Website</span>
+            <select
+              value={selectedSiteId}
+              onChange={(event) => selectSite(event.target.value)}
+              aria-label="Select website report"
+            >
+              <option value="">All websites — collective</option>
+              {data.sites.map((site) => (
+                <option key={site.id} value={site.id}>
+                  {site.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       </div>
 
       {selectedSiteId && (
@@ -505,7 +561,7 @@ export function Reporting() {
                 {siteReports.map(({ site, metrics: siteMetrics }, index) => (
                   <Link
                     key={site.id}
-                    to={`/reports?days=${days}&site=${site.id}`}
+                    to={`/reports?days=${days}&site=${site.id}${reportView !== 'both' ? `&type=${reportView}` : ''}`}
                     className="report-site-card"
                   >
                     <span className="report-site-number">
@@ -513,10 +569,28 @@ export function Reporting() {
                     </span>
                     <div>
                       <strong>{site.name}</strong>
-                      <small>{siteMetrics.totalVisits.toLocaleString()} visits</small>
+                      <small>
+                        {reportView === 'visits'
+                          ? `${siteMetrics.totalVisits.toLocaleString()} visits`
+                          : reportView === 'forms'
+                            ? `${siteMetrics.totalForms.toLocaleString()} form tests`
+                            : `${siteMetrics.totalVisits.toLocaleString()} visits · ${siteMetrics.totalForms.toLocaleString()} forms`}
+                      </small>
                     </div>
-                    <div className={`report-site-score tone-${healthTone(siteMetrics.healthPercent)}`}>
-                      {percent(siteMetrics.healthPercent)}
+                    <div
+                      className={`report-site-score tone-${healthTone(
+                        reportView === 'forms'
+                          ? siteMetrics.formHealthPercent
+                          : siteMetrics.healthPercent
+                      )}`}
+                    >
+                      {reportView === 'both'
+                        ? `W ${percent(siteMetrics.healthPercent)} · F ${percent(siteMetrics.formHealthPercent)}`
+                        : percent(
+                            reportView === 'forms'
+                              ? siteMetrics.formHealthPercent
+                              : siteMetrics.healthPercent
+                          )}
                     </div>
                     <span className="report-site-arrow">→</span>
                   </Link>
@@ -525,9 +599,9 @@ export function Reporting() {
             </section>
           )}
 
-          <ReportMetricsGrid metrics={metrics} />
+          <ReportMetricsGrid metrics={metrics} view={reportView} />
 
-          <section className="report-panel">
+          {reportView !== 'forms' && <section className="report-panel">
             <div className="report-section-head">
               <div>
                 <span className="eyebrow">Website visits</span>
@@ -593,9 +667,9 @@ export function Reporting() {
             ) : (
               <p className="empty">No production website visits in this range.</p>
             )}
-          </section>
+          </section>}
 
-          <section className="report-panel">
+          {reportView !== 'visits' && <section className="report-panel">
             <div className="report-section-head">
               <div>
                 <span className="eyebrow">Form submissions</span>
@@ -661,18 +735,24 @@ export function Reporting() {
             ) : (
               <p className="empty">No production form submissions in this range.</p>
             )}
-          </section>
+          </section>}
 
           <section className="report-panel report-evidence-panel">
             <div className="report-section-head">
               <div>
                 <span className="eyebrow">Evidence</span>
-                <h2>Visits &amp; form submissions</h2>
+                <h2>
+                  {reportView === 'visits'
+                    ? 'Website visits'
+                    : reportView === 'forms'
+                      ? 'Form submissions'
+                      : 'Visits & form submissions'}
+                </h2>
               </div>
               <p>{evidence.length.toLocaleString()} records in this report.</p>
             </div>
 
-            <div className="evidence-switcher">
+            {reportView === 'both' && <div className="evidence-switcher">
               {(['all', 'visit', 'form'] as const).map((kind) => (
                 <button
                   key={kind}
@@ -683,7 +763,7 @@ export function Reporting() {
                   {kind === 'all' ? 'All evidence' : kind === 'visit' ? 'Website visits' : 'Forms'}
                 </button>
               ))}
-            </div>
+            </div>}
 
             <div className="evidence-list">
               {visibleEvidence.map((item) => {

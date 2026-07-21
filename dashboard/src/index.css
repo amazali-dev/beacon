@@ -1163,6 +1163,17 @@ th {
   background: color-mix(in oklab, var(--panel) 90%, transparent);
 }
 
+.report-toolbar-selectors {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.65rem;
+}
+
+.report-type-selector {
+  min-width: 13rem;
+}
+
 .report-site-selector > span {
   color: var(--accent);
   font-size: 0.64rem;
