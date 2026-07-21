@@ -155,6 +155,9 @@ export function formTestSummary(test: FormTest): string {
   ) {
     return 'Skipped — site rate-limited (not a form failure)';
   }
+  if (test.outcome === 'site_failure' && test.layer1_pass !== true) {
+    return 'Form submission failed';
+  }
 
   const parts: string[] = [];
 

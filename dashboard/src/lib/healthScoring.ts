@@ -271,7 +271,11 @@ export function calculateFormHealth(forms: FormTest[]): FormHealthScore {
     detail: 'Test logo accepted by the form upload field',
   };
   const submissionConfirmation: ScoreComponent = {
-    score: formBooleanScore(assessed.map((form) => form.layer1_pass)),
+    score: formBooleanScore(
+      assessed.map((form) =>
+        form.layer1_pass ?? (form.outcome === 'site_failure' ? false : null)
+      )
+    ),
     weight: HEALTH_SCORING_CONFIG.formWeights.submissionConfirmation,
     label: 'Submission confirmation',
     detail: 'Submit completed and a thank-you/confirmation appeared',

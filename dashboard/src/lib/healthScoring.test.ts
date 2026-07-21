@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { healthFromChecks } from './labelMappers';
-import { calculateWebsiteHealth, isRateLimitedFormTest } from './healthScoring';
+import {
+  calculateFormHealth,
+  calculateWebsiteHealth,
+  isRateLimitedFormTest,
+} from './healthScoring';
 import type { FormTest, LoadCheck } from './types';
 
 function check(overrides: Partial<LoadCheck> = {}): LoadCheck {
@@ -69,5 +73,24 @@ describe('current production health', () => {
       outcome: 'success',
     };
     expect(isRateLimitedFormTest(form)).toBe(false);
+  });
+
+  it('counts a recovered HTTP 200 with missing submit control as form failure', () => {
+    const form: FormTest = {
+      id: 'form-2',
+      site_id: 'site-1',
+      run_id: 'MON-2',
+      tested_at: new Date().toISOString(),
+      layer1_pass: null,
+      layer2_pass: null,
+      layer3_pass: null,
+      submit_to_inbox_seconds: null,
+      logo_upload_ok: true,
+      screenshot_path: null,
+      notes: 'Attempt 1 HTTP 429. Attempt 2 fallback HTTP 200. Submit button not found.',
+      outcome: 'site_failure',
+    };
+    expect(isRateLimitedFormTest(form)).toBe(false);
+    expect(calculateFormHealth([form]).submissionConfirmation.score).toBe(0);
   });
 });

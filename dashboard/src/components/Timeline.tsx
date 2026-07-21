@@ -77,7 +77,9 @@ function buildEvents(
 
   for (const f of formTests) {
     const rateLimited = isRateLimitedFormTest(f);
-    const failed = !rateLimited && (f.layer1_pass === false || f.layer2_pass === false);
+    const failed =
+      !rateLimited &&
+      (f.outcome === 'site_failure' || f.layer1_pass === false || f.layer2_pass === false);
     events.push({
       id: `form-${f.id}`,
       type: 'form',

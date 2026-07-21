@@ -491,7 +491,7 @@ export function SiteDetail() {
                             ? 'muted'
                             : formTestPassed(f)
                               ? 'ok'
-                              : f.layer1_pass === false
+                              : f.outcome === 'site_failure' || f.layer1_pass === false
                                 ? 'bad'
                                 : 'muted'
                         }`}
