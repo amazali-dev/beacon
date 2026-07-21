@@ -7,6 +7,7 @@ import './layout.css';
 
 const links = [
   { to: '/', label: 'Overview', end: true },
+  { to: '/reports', label: 'Reporting' },
   { to: '/incidents', label: 'Incidents', badgeKey: 'incidents' as const },
   { to: '/operations', label: 'Operations' },
   { to: '/settings', label: 'Sites' },
@@ -47,7 +48,7 @@ export function Layout() {
     return () => {
       cancelled = true;
     };
-  }, [location.pathname === '/settings']);
+  }, [location.pathname]);
 
   return (
     <div className="shell">
@@ -132,6 +133,27 @@ export function Layout() {
               <p className="site-list-empty">No sites available.</p>
             )}
           </nav>
+
+          <div className="sidebar-category">
+            <span className="eyebrow">Analytics</span>
+            <NavLink
+              to="/reports"
+              className={({ isActive }) =>
+                isActive ? 'reporting-sidebar-link active' : 'reporting-sidebar-link'
+              }
+            >
+              <span className="reporting-mark" aria-hidden>
+                <i />
+                <i />
+                <i />
+              </span>
+              <span>
+                <strong>Reporting</strong>
+                <small>1–30 day health history</small>
+              </span>
+              <b aria-hidden>→</b>
+            </NavLink>
+          </div>
         </aside>
 
         <main className="main">

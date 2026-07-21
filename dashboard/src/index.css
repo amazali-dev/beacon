@@ -956,12 +956,483 @@ th {
   border-top: 1px solid var(--line);
 }
 
+/* Reporting — dense operational history with evidence */
+.report-page {
+  display: grid;
+  gap: 1.1rem;
+}
+
+.report-hero {
+  position: relative;
+  display: flex;
+  min-height: 9.5rem;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 2rem;
+  padding: 1.5rem;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background:
+    linear-gradient(105deg, color-mix(in oklab, var(--accent) 13%, var(--panel)) 0%, var(--panel) 55%),
+    var(--panel);
+}
+
+.report-hero::after {
+  position: absolute;
+  top: -70%;
+  right: -4%;
+  width: 18rem;
+  height: 18rem;
+  border: 1px solid color-mix(in oklab, var(--accent) 19%, transparent);
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 2.5rem color-mix(in oklab, var(--accent) 4%, transparent),
+    0 0 0 5rem color-mix(in oklab, var(--accent) 3%, transparent);
+  content: '';
+  pointer-events: none;
+}
+
+.report-hero > * {
+  position: relative;
+  z-index: 1;
+}
+
+.report-hero h1 {
+  margin: 0.2rem 0;
+  font-size: clamp(1.8rem, 4vw, 2.65rem);
+}
+
+.report-hero p {
+  max-width: 42rem;
+  margin: 0;
+  color: var(--muted);
+}
+
+.report-hero-meta {
+  display: grid;
+  min-width: 12rem;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-align: right;
+}
+
+.report-hero-meta span::before {
+  margin-right: 0.45rem;
+  color: var(--accent);
+  content: '●';
+  font-size: 0.45rem;
+}
+
+.report-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.range-switcher,
+.evidence-switcher {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.range-switcher button,
+.evidence-switcher button {
+  border-radius: 999px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 0.78rem;
+}
+
+.range-switcher button.active,
+.evidence-switcher button.active {
+  border-color: color-mix(in oklab, var(--accent) 52%, var(--line));
+  color: #062018;
+  background: var(--accent);
+  font-weight: 600;
+}
+
+.report-back {
+  color: var(--accent);
+  background: transparent;
+}
+
+.report-formula {
+  margin: 0;
+  padding: 0.7rem 0.9rem;
+  border-left: 2px solid var(--accent);
+  color: var(--muted);
+  background: color-mix(in oklab, var(--panel) 78%, transparent);
+  font-size: 0.78rem;
+}
+
+.report-formula strong {
+  color: var(--ink);
+}
+
+.report-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.report-metric {
+  position: relative;
+  display: grid;
+  min-height: 8rem;
+  align-content: space-between;
+  gap: 0.3rem;
+  padding: 1rem;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  background: var(--panel);
+}
+
+.report-metric::after {
+  position: absolute;
+  inset: auto 0 0;
+  height: 2px;
+  background: var(--line);
+  content: '';
+}
+
+.report-metric.tone-green::after {
+  background: var(--ok);
+}
+
+.report-metric.tone-yellow::after {
+  background: var(--warn);
+}
+
+.report-metric.tone-red::after {
+  background: var(--bad);
+}
+
+.report-metric > strong {
+  font-family: var(--display);
+  font-size: clamp(1.45rem, 3vw, 2rem);
+  letter-spacing: -0.04em;
+}
+
+.report-metric-label {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.report-metric small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.report-panel {
+  padding: 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.7rem;
+  background: color-mix(in oklab, var(--panel) 92%, transparent);
+}
+
+.report-section-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.report-section-head h2 {
+  margin: 0.1rem 0 0;
+  font-size: 1.15rem;
+}
+
+.report-section-head p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.health-history {
+  display: flex;
+  min-height: 15rem;
+  gap: clamp(0.35rem, 1.5vw, 0.8rem);
+  align-items: flex-end;
+  overflow-x: auto;
+  padding: 0.5rem 0 0.25rem;
+}
+
+.health-day {
+  display: grid;
+  min-width: 3.4rem;
+  flex: 1;
+  gap: 0.3rem;
+  text-align: center;
+}
+
+.health-day-value {
+  display: grid;
+}
+
+.health-day-value strong {
+  font-family: var(--display);
+  font-size: 0.78rem;
+}
+
+.health-day-value span,
+.health-day small {
+  color: var(--muted);
+  font-size: 0.62rem;
+}
+
+.health-bar-track {
+  position: relative;
+  width: min(2.2rem, 75%);
+  height: 8rem;
+  margin: 0 auto;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 0.28rem 0.28rem 0.12rem 0.12rem;
+  background:
+    repeating-linear-gradient(
+      to top,
+      transparent 0,
+      transparent 24%,
+      color-mix(in oklab, var(--line) 60%, transparent) 25%
+    ),
+    var(--bg0);
+}
+
+.health-bar-fill {
+  position: absolute;
+  inset: auto 0 0;
+  background: var(--muted);
+  transition: height 300ms ease;
+}
+
+.health-bar-fill.tone-green {
+  background: linear-gradient(to top, #21794b, var(--ok));
+}
+
+.health-bar-fill.tone-yellow {
+  background: linear-gradient(to top, #7d582b, var(--warn));
+}
+
+.health-bar-fill.tone-red {
+  background: linear-gradient(to top, #7a2f2f, var(--bad));
+}
+
+.health-day-label {
+  color: var(--ink);
+  font-size: 0.67rem;
+  white-space: nowrap;
+}
+
+.health-day .rate-note {
+  color: var(--warn);
+}
+
+.report-site-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(255px, 1fr));
+  gap: 0.65rem;
+}
+
+.report-site-card {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr) auto auto;
+  gap: 0.7rem;
+  align-items: center;
+  padding: 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 0.55rem;
+  color: var(--ink);
+  background: var(--panel-2);
+  text-decoration: none;
+  transition: 160ms ease;
+}
+
+.report-site-card:hover {
+  border-color: color-mix(in oklab, var(--accent) 50%, var(--line));
+  transform: translateY(-2px);
+}
+
+.report-site-card > div:nth-child(2) {
+  display: grid;
+}
+
+.report-site-card small,
+.report-site-number {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.report-site-score {
+  font-family: var(--display);
+  font-size: 0.9rem;
+}
+
+.report-site-score.tone-green {
+  color: var(--ok);
+}
+
+.report-site-score.tone-yellow {
+  color: var(--warn);
+}
+
+.report-site-score.tone-red {
+  color: var(--bad);
+}
+
+.report-site-score.tone-gray,
+.report-site-arrow {
+  color: var(--muted);
+}
+
+.report-evidence-panel {
+  min-width: 0;
+}
+
+.evidence-switcher {
+  margin-bottom: 0.85rem;
+}
+
+.evidence-list {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.evidence-row {
+  display: grid;
+  grid-template-columns: 3.2rem minmax(0, 1fr) 7rem;
+  gap: 0.85rem;
+  align-items: start;
+  padding: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--panel);
+}
+
+.evidence-kind {
+  padding-top: 0.25rem;
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.evidence-kind.ok {
+  color: var(--ok);
+}
+
+.evidence-kind.bad {
+  color: var(--bad);
+}
+
+.evidence-kind.limited {
+  color: var(--warn);
+}
+
+.evidence-main {
+  min-width: 0;
+}
+
+.evidence-main header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.evidence-main p {
+  margin: 0.25rem 0 0;
+}
+
+.evidence-notes {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.evidence-row .shot-thumb {
+  justify-self: end;
+}
+
+.report-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.report-loading {
+  display: grid;
+  min-height: 16rem;
+  place-items: center;
+  align-content: center;
+  color: var(--muted);
+}
+
+.report-loader {
+  width: 2rem;
+  height: 2rem;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: report-spin 700ms linear infinite;
+}
+
+@keyframes report-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
 @media (max-width: 640px) {
   .main {
     padding: 1rem;
   }
 
   .card-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .report-hero,
+  .report-toolbar,
+  .report-section-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .report-hero-meta {
+    text-align: left;
+  }
+
+  .report-metrics {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .evidence-row {
+    grid-template-columns: 3rem minmax(0, 1fr);
+  }
+
+  .evidence-row .shot-thumb {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+
+@media (max-width: 420px) {
+  .report-metrics {
     grid-template-columns: 1fr;
   }
 }

@@ -9,6 +9,7 @@ import { Charts } from './pages/Charts';
 import { FormHistory } from './pages/FormHistory';
 import { IncidentsPage } from './pages/Incidents';
 import { Operations } from './pages/Operations';
+import { Reporting } from './pages/Reporting';
 import { Settings } from './pages/Settings';
 import { SiteDetail } from './pages/SiteDetail';
 
@@ -43,6 +44,7 @@ export default function App() {
           <Route path="site/:siteId" element={<SiteDetail />} />
           <Route path="incidents" element={<IncidentsPage />} />
           <Route path="operations" element={<Operations />} />
+          <Route path="reports" element={<Reporting />} />
           <Route path="settings" element={<Settings />} />
           {/* Deep-link compatibility */}
           <Route path="charts" element={<Charts />} />
