@@ -23,6 +23,8 @@ export type ProxyEgress = {
 
 let poolPromise: Promise<StoredProxy[]> | null = null;
 const blockedThisRun = new Set<string>();
+const proxyByBrandThisRun = new Map<string, string>();
+const proxiesAssignedThisRun = new Set<string>();
 
 function validStoredProxy(value: unknown): value is StoredProxy {
   if (!value || typeof value !== 'object') return false;
@@ -75,10 +77,11 @@ function hash(value: string): number {
 }
 
 /**
- * Pick one healthy fallback. The 30-minute bucket rotates assignments on each
- * scheduled run while site/profile keys spread traffic across the whole pool.
+ * Assign one healthy fallback per brand for this workflow run. Brands receive
+ * different proxies until every available proxy has been assigned; only then
+ * is reuse allowed. The same brand keeps its proxy across profiles and forms.
  */
-export async function selectFallbackProxy(key: string): Promise<SelectedProxy | null> {
+export async function selectFallbackProxy(brandId: string): Promise<SelectedProxy | null> {
   const available = (await pool())
     .map((entry, index) => ({
       id: entry.id || `proxy-${index + 1}`,
@@ -92,8 +95,21 @@ export async function selectFallbackProxy(key: string): Promise<SelectedProxy | 
     .filter((entry) => !blockedThisRun.has(entry.id));
 
   if (available.length === 0) return null;
+
+  const existingId = proxyByBrandThisRun.get(brandId);
+  const existing = existingId
+    ? available.find((entry) => entry.id === existingId)
+    : undefined;
+  if (existing) return existing;
+
+  const unused = available.filter((entry) => !proxiesAssignedThisRun.has(entry.id));
+  const candidates = unused.length > 0 ? unused : available;
   const halfHourBucket = Math.floor(Date.now() / (30 * 60 * 1000));
-  return available[hash(`${key}:${halfHourBucket}`) % available.length];
+  const selected = candidates[hash(`${brandId}:${halfHourBucket}`) % candidates.length];
+  proxyByBrandThisRun.set(brandId, selected.id);
+  proxiesAssignedThisRun.add(selected.id);
+  console.log(`  assigned ${selected.label} to brand ${brandId} for this run`);
+  return selected;
 }
 
 export function markProxyBlocked(proxy: SelectedProxy): void {

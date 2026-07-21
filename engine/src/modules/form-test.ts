@@ -105,7 +105,7 @@ export async function runFormTestForSite(
     let navigationBlocked = nav.rateLimited || (await pageLooksRateLimited(page));
 
     if (navigationBlocked) {
-      const proxy = await selectFallbackProxy(`form:${site.id}`);
+      const proxy = await selectFallbackProxy(site.id);
       if (proxy) {
         notes.push(
           `Attempt 1 direct was rate-limited${nav.statusCode ? ` (HTTP ${nav.statusCode})` : ''}. Attempt 2 uses ${proxy.label}.`

@@ -342,7 +342,7 @@ export async function runLoadCheckForSiteProfile(
   let checkIp = geo.ip;
 
   if (attempt.statusCode === 429) {
-    const proxy = await selectFallbackProxy(`load:${site.id}:${profile}`);
+    const proxy = await selectFallbackProxy(site.id);
     if (proxy) {
       console.log(`  direct attempt returned HTTP 429; retrying once via ${proxy.label}`);
       const directNote = attempt.notes || 'Direct attempt returned HTTP 429.';
