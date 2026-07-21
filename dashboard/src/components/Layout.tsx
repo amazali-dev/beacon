@@ -6,7 +6,7 @@ import type { Site } from '../lib/types';
 import './layout.css';
 
 const links = [
-  { to: '/', label: 'Overview', end: true },
+  { to: '/', label: 'Dashboard', end: true },
   { to: '/reports', label: 'Reporting' },
   { to: '/incidents', label: 'Incidents', badgeKey: 'incidents' as const },
   { to: '/operations', label: 'Operations' },
