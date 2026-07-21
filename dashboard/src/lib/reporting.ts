@@ -55,6 +55,21 @@ export type DailyReportPoint = {
   averageLoadMs: number | null;
 };
 
+export type DailyFormReportPoint = {
+  key: string;
+  label: string;
+  total: number;
+  assessed: number;
+  successful: number;
+  failed: number;
+  skipped: number;
+  healthPercent: number | null;
+  contactFieldsPercent: number | null;
+  logoUploadPercent: number | null;
+  submissionPercent: number | null;
+  leadEmailPercent: number | null;
+};
+
 const PAGE_SIZE = 1000;
 const SLOW_MS = 8000;
 
@@ -246,6 +261,44 @@ export function buildDailyHistory(checks: LoadCheck[]): DailyReportPoint[] {
         performancePercent: websiteHealth.performance.score,
         browserPercent: websiteHealth.browserCompatibility.score,
         averageLoadMs: roundedAverage(times),
+      };
+    });
+}
+
+export function buildDailyFormHistory(forms: FormTest[]): DailyFormReportPoint[] {
+  const grouped = new Map<string, FormTest[]>();
+
+  for (const form of forms) {
+    const key = pakistanDayKey(form.tested_at);
+    grouped.set(key, [...(grouped.get(key) || []), form]);
+  }
+
+  return [...grouped.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, rows]) => {
+      const health = calculateFormHealth(rows);
+      const successful = rows.filter((row) => row.layer1_pass === true).length;
+      const failed = rows.filter(
+        (row) => row.layer1_pass === false && !isRateLimitedForm(row)
+      ).length;
+
+      return {
+        key,
+        label: new Date(`${key}T12:00:00+05:00`).toLocaleDateString('en-PK', {
+          month: 'short',
+          day: 'numeric',
+          timeZone: 'Asia/Karachi',
+        }),
+        total: rows.length,
+        assessed: health.assessedForms,
+        successful,
+        failed,
+        skipped: health.skippedForms,
+        healthPercent: health.score,
+        contactFieldsPercent: health.contactFields.score,
+        logoUploadPercent: health.logoUpload.score,
+        submissionPercent: health.submissionConfirmation.score,
+        leadEmailPercent: health.leadEmail.score,
       };
     });
 }

@@ -6,6 +6,7 @@ import {
   type ScoreComponent,
 } from '../lib/healthScoring';
 import {
+  buildDailyFormHistory,
   buildDailyHistory,
   calculateReportMetrics,
   hasContentIssue,
@@ -358,6 +359,7 @@ export function Reporting() {
     [data.checks, data.forms]
   );
   const history = useMemo(() => buildDailyHistory(data.checks), [data.checks]);
+  const formHistory = useMemo(() => buildDailyFormHistory(data.forms), [data.forms]);
 
   const siteReports = useMemo(
     () =>
@@ -519,10 +521,10 @@ export function Reporting() {
           <section className="report-panel">
             <div className="report-section-head">
               <div>
-                <span className="eyebrow">Trend</span>
-                <h2>Daily overall health history</h2>
+                <span className="eyebrow">Website visits</span>
+                <h2>Daily website visit health</h2>
               </div>
-              <p>Composite health and its four scoring components, day by day.</p>
+              <p>Website page-load checks only. Form submissions are shown separately below.</p>
             </div>
             {history.length ? (
               <div className="health-history">
@@ -530,7 +532,7 @@ export function Reporting() {
                   <article key={point.key} className="health-day">
                     <div className="health-day-date">
                       <span>{point.label}</span>
-                      <small>{point.total} recorded visits</small>
+                      <small>{point.total} website visits</small>
                     </div>
                     <div className="health-day-overall">
                       <span>Overall health</span>
@@ -580,7 +582,75 @@ export function Reporting() {
                 ))}
               </div>
             ) : (
-              <p className="empty">No production visits in this range.</p>
+              <p className="empty">No production website visits in this range.</p>
+            )}
+          </section>
+
+          <section className="report-panel">
+            <div className="report-section-head">
+              <div>
+                <span className="eyebrow">Form submissions</span>
+                <h2>Daily form submission health</h2>
+              </div>
+              <p>Quote-form tests only. Website page-load visits are not included here.</p>
+            </div>
+            {formHistory.length ? (
+              <div className="health-history form-health-history">
+                {formHistory.map((point) => (
+                  <article key={point.key} className="health-day">
+                    <div className="health-day-date">
+                      <span>{point.label}</span>
+                      <small>{point.total} form tests</small>
+                    </div>
+                    <div className="health-day-overall">
+                      <span>Form health</span>
+                      <strong className={`tone-${healthTone(point.healthPercent)}`}>
+                        {percent(point.healthPercent)}
+                      </strong>
+                      <div className="health-score-track">
+                        <span
+                          className={`tone-${healthTone(point.healthPercent)}`}
+                          style={{ width: `${Math.max(0, point.healthPercent || 0)}%` }}
+                        />
+                      </div>
+                    </div>
+                    <div className="health-day-components">
+                      <span>
+                        <small>Contact fields</small>
+                        <strong>{percent(point.contactFieldsPercent)}</strong>
+                      </span>
+                      <span>
+                        <small>Logo upload</small>
+                        <strong>{percent(point.logoUploadPercent)}</strong>
+                      </span>
+                      <span>
+                        <small>Submission</small>
+                        <strong>{percent(point.submissionPercent)}</strong>
+                      </span>
+                      <span>
+                        <small>Lead email</small>
+                        <strong>{percent(point.leadEmailPercent)}</strong>
+                      </span>
+                    </div>
+                    <div className="health-day-volume">
+                      <span>
+                        <strong>{point.successful}/{point.assessed}</strong>
+                        <small>forms submitted</small>
+                      </span>
+                      <span className={point.failed ? 'form-fail-note' : ''}>
+                        <strong>{point.failed}</strong>
+                        <small>failed forms</small>
+                      </span>
+                      <span className={point.skipped ? 'rate-note' : ''}>
+                        <strong>{point.skipped}</strong>
+                        <small>skipped tests</small>
+                      </span>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="empty">No production form submissions in this range.</p>
             )}
           </section>
 

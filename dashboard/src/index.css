@@ -1564,6 +1564,11 @@ th {
   color: var(--warn);
 }
 
+.health-day-volume .form-fail-note strong,
+.health-day-volume .form-fail-note small {
+  color: var(--bad);
+}
+
 .report-site-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(255px, 1fr));
