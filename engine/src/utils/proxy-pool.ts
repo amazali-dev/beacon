@@ -45,8 +45,23 @@ async function fetchPool(): Promise<StoredProxy[]> {
     } else {
       const result = data as { enabled?: boolean; pool?: unknown } | null;
       if (result?.enabled && Array.isArray(result.pool)) {
-        const pool = result.pool.filter(validStoredProxy);
-        if (pool.length > 0) return pool;
+        const stored = result.pool.filter(validStoredProxy);
+        if (stored.length > 0) {
+          const { data: health, error: healthError } = await getSupabase()
+            .from('proxy_health')
+            .select('proxy_id,blocked_until');
+          if (healthError) {
+            console.warn(`Proxy health unavailable: ${healthError.message}`);
+            return stored;
+          }
+          const now = Date.now();
+          const blocked = new Set(
+            (health || [])
+              .filter((row) => row.blocked_until && new Date(row.blocked_until).getTime() > now)
+              .map((row) => row.proxy_id)
+          );
+          return stored.filter((entry, index) => !blocked.has(entry.id || `proxy-${index + 1}`));
+        }
       }
     }
   } catch (err) {
@@ -112,9 +127,18 @@ export async function selectFallbackProxy(brandId: string): Promise<SelectedProx
   return selected;
 }
 
-export function markProxyBlocked(proxy: SelectedProxy): void {
+export async function markProxyBlocked(
+  proxy: SelectedProxy,
+  reason = 'HTTP 429 from target'
+): Promise<void> {
   blockedThisRun.add(proxy.id);
   console.warn(`${proxy.label} returned HTTP 429; cooling it down for the rest of this run.`);
+  const { error } = await getSupabase().rpc('record_proxy_failure', {
+    p_proxy_id: proxy.id,
+    p_reason: reason,
+    p_cooldown_minutes: 120,
+  });
+  if (error) console.warn(`Could not persist proxy cooldown: ${error.message}`);
 }
 
 export async function verifyProxyEgress(context: BrowserContext): Promise<ProxyEgress> {

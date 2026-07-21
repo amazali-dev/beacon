@@ -10,7 +10,7 @@
 
 import { join } from 'node:path';
 import { chromium } from 'playwright';
-import { engineRootPath, getTestIdentity, isInboxVerificationEnabled, loadConfig } from '../config.js';
+import { engineRootPath, getEnv, getTestIdentity, isInboxVerificationEnabled, loadConfig } from '../config.js';
 import {
   fetchActiveSites,
   insertFormTest,
@@ -25,8 +25,10 @@ import { withMonitorParam } from '../utils/monitor-param.js';
 import {
   markProxyBlocked,
   selectFallbackProxy,
+  type SelectedProxy,
   verifyProxyEgress,
 } from '../utils/proxy-pool.js';
+import { classifyCheckOutcome } from '../utils/outcomes.js';
 import { captureFormScreenshot } from '../utils/screenshots.js';
 import { gotoWithRetries, pageLooksRateLimited, sleep } from '../utils/navigate.js';
 import {
@@ -73,6 +75,14 @@ export async function runFormTestForSite(
   let logoUploadOk: boolean | null = null;
   let screenshotPath: string | null = null;
   let rateLimited = false;
+  let monitorError = false;
+  let directStatus: number | null = null;
+  let fallbackStatus: number | null = null;
+  let proxyUsed = false;
+  let selectedProxy: SelectedProxy | null = null;
+  const productionEgressRequired = geo.deploymentMode === 'production';
+  let egressVerified =
+    !productionEgressRequired || (geo.isUs && Boolean(geo.country && geo.ip));
   let checkCountry = geo.country;
   let checkIp = geo.ip;
   const notes: string[] = [];
@@ -97,16 +107,19 @@ export async function runFormTestForSite(
     locale: 'en-US',
     timezoneId: 'America/New_York',
   });
-  const submittedAt = Date.now();
+  let submittedAt = Date.now();
 
   try {
     let nav = await gotoWithRetries(page, formUrl, 1);
+    directStatus = nav.statusCode;
     if (nav.note) notes.push(nav.note);
     let navigationBlocked = nav.rateLimited || (await pageLooksRateLimited(page));
 
     if (navigationBlocked) {
       const proxy = await selectFallbackProxy(site.id);
       if (proxy) {
+        selectedProxy = proxy;
+        proxyUsed = true;
         notes.push(
           `Attempt 1 direct was rate-limited${nav.statusCode ? ` (HTTP ${nav.statusCode})` : ''}. Attempt 2 uses ${proxy.label}.`
         );
@@ -130,14 +143,24 @@ export async function runFormTestForSite(
         // Do not label proxied traffic with the GitHub runner's direct location.
         checkCountry = egress.country;
         checkIp = egress.ip;
+        egressVerified = productionEgressRequired
+          ? (egress.country || '').toUpperCase() === config.requiredCountry.toUpperCase() &&
+            Boolean(egress.ip)
+          : Boolean(egress.ip);
+        if (!egressVerified) {
+          monitorError = true;
+          notes.push('Proxy egress was not verified in the required country.');
+          await markProxyBlocked(proxy, 'Unknown or non-US proxy egress');
+        }
         console.log(
           `  fallback ${proxy.label}: ${egress.country || 'unknown country'} / ${egress.ip || 'unknown IP'}`
         );
         page = await context.newPage();
         nav = await gotoWithRetries(page, formUrl, 1);
+        fallbackStatus = nav.statusCode;
         notes.push(`Attempt 2 ${proxy.label}: HTTP ${nav.statusCode ?? 'no response'}.`);
         navigationBlocked = nav.rateLimited || (await pageLooksRateLimited(page));
-        if (navigationBlocked) markProxyBlocked(proxy);
+        if (navigationBlocked) await markProxyBlocked(proxy);
       } else {
         notes.push('No enabled fallback proxy was available.');
       }
@@ -178,6 +201,9 @@ export async function runFormTestForSite(
 
       if (!rateLimited) {
         await fillContactFields(page, identity, selectors, notes);
+        if (/name field fill failed|email field fill failed|phone field fill failed/i.test(notes.join(' '))) {
+          throw new Error('Required contact fields were not filled successfully');
+        }
 
         if (selectors.file) {
           try {
@@ -207,6 +233,7 @@ export async function runFormTestForSite(
         await page.waitForTimeout(800);
 
         await clickQuoteSubmit(page, selectors.submit);
+        submittedAt = Date.now();
 
         const layer1Timeout = config.formLayer1TimeoutSeconds * 1000;
         layer1 = await waitForThankYou(page, layer1Timeout);
@@ -252,19 +279,22 @@ export async function runFormTestForSite(
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    if (selectedProxy && /net::|proxy|tunnel|connection|timeout|browser.*closed/i.test(msg)) {
+      await markProxyBlocked(selectedProxy, `Fallback execution failed: ${msg}`);
+    }
     if (/429|rate.?limit|too many requests/i.test(msg) || (await pageLooksRateLimited(page))) {
       rateLimited = true;
       notes.push(`SKIPPED due to rate limit: ${msg}`);
     } else {
-      notes.push(`Form test failed to run: ${msg}`);
-      // Field/submit missing often means we landed on a block page after soft 429
-      if (
-        /submit button not found|field fill failed/i.test(notes.join(' ')) &&
-        (await pageLooksRateLimited(page))
-      ) {
-        rateLimited = true;
-        notes.push('SKIPPED: treated as CDN rate limit (block page), not a form bug.');
-        layer1 = null;
+      const requiredFormControlFailed =
+        /required form submit control|required contact fields|field fill failed/i.test(msg);
+      if (requiredFormControlFailed) {
+        layer1 = false;
+        monitorError = false;
+        notes.push(`Form requirement failed: ${msg}`);
+      } else {
+        monitorError = true;
+        notes.push(`Form test failed to run: ${msg}`);
       }
     }
   }
@@ -289,6 +319,13 @@ export async function runFormTestForSite(
     layer2 = null;
     logoUploadOk = null;
   }
+  const outcome = classifyCheckOutcome({
+    statusCode: fallbackStatus ?? directStatus,
+    completedSuccessfully: layer1 === true,
+    rateLimitEvidence: rateLimited,
+    monitorError: monitorError || layer1 === null,
+    egressVerified,
+  });
 
   await insertFormTest({
     site_id: site.id,
@@ -303,11 +340,18 @@ export async function runFormTestForSite(
     is_production: geo.isProduction,
     check_country: checkCountry,
     check_ip: checkIp,
+    outcome,
+    workflow_run_id: getEnv('GITHUB_RUN_ID') || null,
+    commit_sha: getEnv('GITHUB_SHA') || null,
+    direct_status: directStatus,
+    fallback_status: fallbackStatus,
+    proxy_used: proxyUsed,
+    egress_verified: egressVerified,
   });
 
   const submissionOnly = !isInboxVerificationEnabled();
   const anyFail =
-    !rateLimited && (layer1 === false || (!submissionOnly && layer2 === false));
+    !monitorError && !rateLimited && (layer1 === false || (!submissionOnly && layer2 === false));
   if (anyFail) {
     const id = await openIncident({
       site_id: site.id,
@@ -326,6 +370,14 @@ export async function runFormTestForSite(
     });
   } else if (layer1 === true && (submissionOnly || layer2 === true)) {
     await closeIncident(site.id, 'form_test_failure');
+    await closeIncident(site.id, 'form_check_failed_to_run');
+  } else if (monitorError) {
+    await openIncident({
+      site_id: site.id,
+      type: 'form_check_failed_to_run',
+      detail: `${site.name} form monitor could not complete. ${notes.join(' ')}`,
+      screenshot_path: screenshotPath,
+    });
   }
 
   console.log(
@@ -345,18 +397,20 @@ export async function runAllFormTests(opts: {
   geo: GeoGuardResult;
   oneSite?: boolean;
   headed?: boolean;
-}): Promise<void> {
-  const sites = (await fetchActiveSites({ oneSite: opts.oneSite })).filter(
+  siteId?: string | null;
+}): Promise<number> {
+  const sites = (await fetchActiveSites({ oneSite: opts.oneSite, siteId: opts.siteId })).filter(
     (s) => s.form_testing_enabled
   );
   if (sites.length === 0) {
     console.log('No sites with form testing enabled.');
-    return;
+    return 0;
   }
 
   const pauseMs = loadConfig().delayMsBetweenChecks ?? 12000;
   const abortAfter = loadConfig().abortAfterConsecutiveRateLimits ?? 3;
   let consecutiveRateLimits = 0;
+  let completedChecks = 0;
 
   console.log(`Form tests: waiting 20s before first site…`);
   await sleep(20_000);
@@ -364,7 +418,40 @@ export async function runAllFormTests(opts: {
   for (let i = 0; i < sites.length; i++) {
     const site = sites[i]!;
     console.log(`→ Form test ${site.name}…`);
-    const result = await runFormTestForSite(site, opts.geo, { headed: opts.headed });
+    let result: { rateLimited: boolean; ok: boolean };
+    try {
+      result = await runFormTestForSite(site, opts.geo, { headed: opts.headed });
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      console.error(`  form monitor error: ${detail}`);
+      await insertFormTest({
+        site_id: site.id,
+        run_id: buildRunId(),
+        layer1_pass: null,
+        layer2_pass: null,
+        layer3_pass: null,
+        submit_to_inbox_seconds: null,
+        logo_upload_ok: null,
+        screenshot_path: null,
+        notes: `Form test failed to run: ${detail}`,
+        is_production: opts.geo.isProduction,
+        check_country: opts.geo.country,
+        check_ip: opts.geo.ip,
+        outcome: 'monitor_error',
+        workflow_run_id: getEnv('GITHUB_RUN_ID') || null,
+        commit_sha: getEnv('GITHUB_SHA') || null,
+        egress_verified:
+          opts.geo.deploymentMode !== 'production' ||
+          (opts.geo.isUs && Boolean(opts.geo.ip)),
+      });
+      await openIncident({
+        site_id: site.id,
+        type: 'form_check_failed_to_run',
+        detail,
+      });
+      result = { rateLimited: false, ok: false };
+    }
+    completedChecks += 1;
     if (result.rateLimited) {
       consecutiveRateLimits += 1;
       console.log(`  form rate-limit streak ${consecutiveRateLimits}/${abortAfter}`);
@@ -372,7 +459,7 @@ export async function runAllFormTests(opts: {
         console.warn(
           `\n!!! ABORTING FORM TESTS — CDN rate-limited ${abortAfter} sites in a row. Stopping early.\n`
         );
-        return;
+        return completedChecks;
       }
     } else if (result.ok) {
       consecutiveRateLimits = 0;
@@ -383,4 +470,5 @@ export async function runAllFormTests(opts: {
       await sleep(gap);
     }
   }
+  return completedChecks;
 }

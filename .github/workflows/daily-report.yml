@@ -1,16 +1,18 @@
-# Daily HTML report email at 23:30 US Eastern.
+# Hourly recovery poll; the engine claims each 23:30 Eastern report slot once.
 
 name: Daily report
 
 on:
   schedule:
-    # 23:30 Eastern = 03:30 UTC (EDT) or 04:30 UTC (EST)
-    - cron: '30 3,4 * * *'
+    - cron: "41 * * * *"
   workflow_dispatch:
 
 concurrency:
   group: daily-report
   cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
   daily-report:
@@ -22,43 +24,34 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Only run near 23:30 US Eastern
-        id: gate
-        shell: bash
-        run: |
-          HOUR=$(TZ=America/New_York date +%H)
-          MIN=$(TZ=America/New_York date +%M)
-          # Accept 23:25–23:40 in case cron is a few minutes early/late
-          if [[ "$HOUR" == "23" && "$MIN" -ge 25 && "$MIN" -le 40 ]]; then
-            echo "due=true" >> "$GITHUB_OUTPUT"
-            echo "Eastern time is $HOUR:$MIN — sending daily report."
-          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "due=true" >> "$GITHUB_OUTPUT"
-            echo "Manual run — sending daily report."
-          else
-            echo "due=false" >> "$GITHUB_OUTPUT"
-            echo "Eastern time is $HOUR:$MIN — not report time. Skipping."
-          fi
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Setup Node.js
-        if: steps.gate.outputs.due == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: '22'
+          node-version: "22"
           cache: npm
           cache-dependency-path: engine/package-lock.json
 
       - name: Install npm packages
-        if: steps.gate.outputs.due == 'true'
         run: npm ci
 
+      - name: Validate production configuration
+        env:
+          PRECHECK_KIND: report
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          REPORT_TO: ${{ secrets.REPORT_TO }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+        run: npm run preflight
+
       - name: Send daily report
-        if: steps.gate.outputs.due == 'true'
         env:
           DEPLOYMENT_MODE: production
-          FORCE_PRODUCTION: 'true'
+          FORCE_PRODUCTION: "true"
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
@@ -68,4 +61,9 @@ jobs:
           ALERT_TO: ${{ secrets.ALERT_TO }}
           REPORT_TO: ${{ secrets.REPORT_TO }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-        run: npm run report:daily
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            npm run report:daily
+          else
+            npm run report:slot
+          fi

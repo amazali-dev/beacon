@@ -29,6 +29,14 @@ export type LoadCheck = {
   notes: string | null;
   check_country?: string | null;
   check_ip?: string | null;
+  outcome?: 'success' | 'site_failure' | 'rate_limited' | 'monitor_error' | 'skipped';
+  page_url?: string | null;
+  workflow_run_id?: string | null;
+  commit_sha?: string | null;
+  direct_status?: number | null;
+  fallback_status?: number | null;
+  proxy_used?: boolean;
+  egress_verified?: boolean;
 };
 
 export type FormTest = {
@@ -46,6 +54,13 @@ export type FormTest = {
   is_production?: boolean;
   check_country?: string | null;
   check_ip?: string | null;
+  outcome?: 'success' | 'site_failure' | 'rate_limited' | 'monitor_error' | 'skipped';
+  workflow_run_id?: string | null;
+  commit_sha?: string | null;
+  direct_status?: number | null;
+  fallback_status?: number | null;
+  proxy_used?: boolean;
+  egress_verified?: boolean;
 };
 
 export type Incident = {
@@ -57,6 +72,7 @@ export type Incident = {
   detail: string | null;
   alerted: boolean;
   screenshot_path: string | null;
+  is_production?: boolean;
 };
 
 export type Health = 'green' | 'yellow' | 'red' | 'gray';

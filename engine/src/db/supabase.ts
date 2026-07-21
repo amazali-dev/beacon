@@ -4,7 +4,7 @@
  */
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { getEnv, requireEnv } from '../config.js';
+import { getDeploymentMode, getEnv, requireEnv } from '../config.js';
 import type { SiteRow } from '../types.js';
 
 let client: SupabaseClient | null = null;
@@ -22,6 +22,7 @@ export function getSupabase(): SupabaseClient {
 /** Fresh site list at the start of every run (Settings page changes apply next run). */
 export async function fetchActiveSites(opts?: {
   oneSite?: boolean;
+  siteId?: string | null;
 }): Promise<SiteRow[]> {
   const sb = getSupabase();
   let query = sb
@@ -34,6 +35,9 @@ export async function fetchActiveSites(opts?: {
 
   if (opts?.oneSite) {
     query = query.limit(1);
+  }
+  if (opts?.siteId) {
+    query = query.eq('id', opts.siteId);
   }
 
   const { data, error } = await query;
@@ -66,6 +70,14 @@ export async function insertLoadCheck(row: {
   notes: string | null;
   check_country?: string | null;
   check_ip?: string | null;
+  outcome?: 'success' | 'site_failure' | 'rate_limited' | 'monitor_error' | 'skipped';
+  page_url?: string | null;
+  workflow_run_id?: string | null;
+  commit_sha?: string | null;
+  direct_status?: number | null;
+  fallback_status?: number | null;
+  proxy_used?: boolean;
+  egress_verified?: boolean;
 }): Promise<void> {
   const { error } = await getSupabase().from('load_checks').insert(row);
   if (error) {
@@ -86,6 +98,13 @@ export async function insertFormTest(row: {
   is_production: boolean;
   check_country?: string | null;
   check_ip?: string | null;
+  outcome?: 'success' | 'site_failure' | 'rate_limited' | 'monitor_error' | 'skipped';
+  workflow_run_id?: string | null;
+  commit_sha?: string | null;
+  direct_status?: number | null;
+  fallback_status?: number | null;
+  proxy_used?: boolean;
+  egress_verified?: boolean;
 }): Promise<void> {
   const { error } = await getSupabase().from('form_tests').insert(row);
   if (error) {
@@ -123,19 +142,20 @@ export async function uploadScreenshot(
     console.warn(`Screenshot upload failed: ${error.message}`);
     return null;
   }
-  const { data } = sb.storage.from('screenshots').getPublicUrl(remotePath);
-  return data.publicUrl;
+  return remotePath;
 }
 
 export async function findOpenIncident(
   siteId: string,
-  type: string
+  type: string,
+  isProduction = getDeploymentMode() === 'production'
 ): Promise<{ id: string; last_alerted_at: string | null } | null> {
   const { data, error } = await getSupabase()
     .from('incidents')
     .select('id,last_alerted_at')
     .eq('site_id', siteId)
     .eq('type', type)
+    .eq('is_production', isProduction)
     .is('closed_at', null)
     .order('opened_at', { ascending: false })
     .limit(1)
@@ -149,8 +169,10 @@ export async function openIncident(row: {
   type: string;
   detail: string;
   screenshot_path?: string | null;
+  is_production?: boolean;
 }): Promise<string> {
-  const existing = await findOpenIncident(row.site_id, row.type);
+  const isProduction = row.is_production ?? getDeploymentMode() === 'production';
+  const existing = await findOpenIncident(row.site_id, row.type, isProduction);
   if (existing) return existing.id;
   const { data, error } = await getSupabase()
     .from('incidents')
@@ -160,30 +182,42 @@ export async function openIncident(row: {
       detail: row.detail,
       screenshot_path: row.screenshot_path || null,
       alerted: false,
+      is_production: isProduction,
     })
     .select('id')
     .single();
+  if (error?.code === '23505') {
+    const raced = await findOpenIncident(row.site_id, row.type, isProduction);
+    if (raced) return raced.id;
+  }
   if (error) throw new Error(error.message);
   return data.id;
 }
 
-export async function closeIncident(siteId: string, type: string): Promise<void> {
-  await getSupabase()
+export async function closeIncident(
+  siteId: string,
+  type: string,
+  isProduction = getDeploymentMode() === 'production'
+): Promise<void> {
+  const { error } = await getSupabase()
     .from('incidents')
     .update({ closed_at: new Date().toISOString() })
     .eq('site_id', siteId)
     .eq('type', type)
+    .eq('is_production', isProduction)
     .is('closed_at', null);
+  if (error) throw new Error(`Could not close incident: ${error.message}`);
 }
 
 export async function markIncidentAlerted(incidentId: string): Promise<void> {
-  await getSupabase()
+  const { error } = await getSupabase()
     .from('incidents')
     .update({
       alerted: true,
       last_alerted_at: new Date().toISOString(),
     })
     .eq('id', incidentId);
+  if (error) throw new Error(`Could not mark incident alerted: ${error.message}`);
 }
 
 export async function countRecentSlowChecks(

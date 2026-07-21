@@ -15,18 +15,26 @@ export function IncidentsPage() {
 
   useEffect(() => {
     void (async () => {
-      const [{ data: siteRows }, { data: incidentRows }] = await Promise.all([
+      const [{ data: siteRows }, { data: openRows }, { data: closedRows }] = await Promise.all([
         supabase.from('sites').select('*'),
         supabase
           .from('incidents')
           .select('*')
+          .eq('is_production', true)
+          .is('closed_at', null)
+          .order('opened_at', { ascending: false }),
+        supabase
+          .from('incidents')
+          .select('*')
+          .eq('is_production', true)
+          .not('closed_at', 'is', null)
           .order('opened_at', { ascending: false })
-          .limit(150),
+          .limit(500),
       ]);
       const map: Record<string, Site> = {};
       for (const s of (siteRows || []) as Site[]) map[s.id] = s;
       setSites(map);
-      setRows((incidentRows || []) as Incident[]);
+      setRows([...(openRows || []), ...(closedRows || [])] as Incident[]);
     })();
   }, []);
 

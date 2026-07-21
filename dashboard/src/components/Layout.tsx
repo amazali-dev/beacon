@@ -11,7 +11,7 @@ const links = [
   { to: '/incidents', label: 'Incidents', badgeKey: 'incidents' as const },
   { to: '/operations', label: 'Operations' },
   { to: '/proxies', label: 'Proxies' },
-  { to: '/settings', label: 'Sites' },
+  { to: '/settings', label: 'Settings' },
 ];
 
 export function Layout() {
@@ -19,6 +19,7 @@ export function Layout() {
   const [openIncidents, setOpenIncidents] = useState(0);
   const [sites, setSites] = useState<Pick<Site, 'id' | 'name' | 'main_url' | 'active'>[]>([]);
   const location = useLocation();
+  const buildSha = import.meta.env.VITE_COMMIT_SHA?.slice(0, 7) || 'untracked';
 
   useEffect(() => {
     const t = setInterval(() => setClock(nowPakistanClock()), 30_000);
@@ -29,6 +30,7 @@ export function Layout() {
     void supabase
       .from('incidents')
       .select('id', { count: 'exact', head: true })
+      .eq('is_production', true)
       .is('closed_at', null)
       .then(({ count }) => setOpenIncidents(count || 0));
   }, [location.pathname]);
@@ -77,6 +79,9 @@ export function Layout() {
           ))}
         </nav>
         <div className="topbar-right">
+          <span className="clock" title="Dashboard deployed commit">
+            Build {buildSha}
+          </span>
           <span className="clock" title={`Pakistan time (${TIME_LABEL})`}>
             {clock} {TIME_LABEL}
           </span>

@@ -2,7 +2,7 @@
  * Settings and job queue — controlled from the Beacon dashboard.
  */
 
-import { loadConfig } from '../config.js';
+import { getEnv, loadConfig, setRuntimeConfig } from '../config.js';
 import { getSupabase } from './supabase.js';
 import type { EngineConfig } from '../types.js';
 
@@ -77,6 +77,12 @@ export async function fetchRuntimeSettings(): Promise<RuntimeSettings> {
   }
 }
 
+export async function hydrateRuntimeSettings(): Promise<RuntimeSettings> {
+  const settings = await fetchRuntimeSettings();
+  setRuntimeConfig(settings);
+  return settings;
+}
+
 export async function touchEngineHeartbeat(
   mode: string,
   geo?: { country: string | null; ip: string | null; isUs: boolean }
@@ -114,26 +120,17 @@ export type CheckJobType = 'load_check' | 'form_test' | 'detect_forms' | 'daily_
 export async function claimNextJob(): Promise<{
   id: string;
   job_type: CheckJobType;
+  site_id: string | null;
 } | null> {
-  const { data: pending } = await getSupabase()
-    .from('check_jobs')
-    .select('id,job_type')
-    .eq('status', 'pending')
-    .order('requested_at', { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (!pending) return null;
-
-  const { data: claimed } = await getSupabase()
-    .from('check_jobs')
-    .update({ status: 'running', started_at: new Date().toISOString() })
-    .eq('id', pending.id)
-    .eq('status', 'pending')
-    .select('id,job_type')
-    .maybeSingle();
-
-  return claimed as { id: string; job_type: CheckJobType } | null;
+  const runnerId =
+    getEnv('GITHUB_RUN_ID') || `local-${process.pid}-${Date.now().toString(36)}`;
+  const { data, error } = await getSupabase().rpc('claim_next_check_job', {
+    p_runner_id: runnerId,
+    p_lease_minutes: 65,
+  });
+  if (error) throw new Error(`Could not claim queued job: ${error.message}`);
+  if (!data) return null;
+  return data as { id: string; job_type: CheckJobType; site_id: string | null };
 }
 
 export async function finishJob(
@@ -141,12 +138,66 @@ export async function finishJob(
   ok: boolean,
   notes?: string
 ): Promise<void> {
-  await getSupabase()
+  const { error } = await getSupabase()
     .from('check_jobs')
     .update({
       status: ok ? 'done' : 'failed',
       completed_at: new Date().toISOString(),
       notes: notes || null,
+      lease_expires_at: null,
+      runner_id: null,
     })
     .eq('id', id);
+  if (error) throw new Error(`Could not finish queued job: ${error.message}`);
+}
+
+export async function startMonitorRun(input: {
+  runKey: string;
+  jobType: string;
+  isProduction: boolean;
+  country: string | null;
+  ip: string | null;
+  expectedChecks?: number;
+}): Promise<void> {
+  const { error } = await getSupabase().from('monitor_runs').upsert(
+    {
+      run_key: input.runKey,
+      job_type: input.jobType,
+      status: 'running',
+      is_production: input.isProduction,
+      country: input.country,
+      ip: input.ip,
+      expected_checks: input.expectedChecks ?? null,
+      completed_checks: 0,
+      started_at: new Date().toISOString(),
+      completed_at: null,
+      commit_sha: getEnv('GITHUB_SHA') || null,
+      workflow_run_id: getEnv('GITHUB_RUN_ID') || null,
+    },
+    { onConflict: 'run_key' }
+  );
+  if (error) throw new Error(`Could not start monitor run: ${error.message}`);
+}
+
+export async function finishMonitorRun(
+  runKey: string,
+  status: 'completed' | 'partial' | 'failed' | 'skipped',
+  completedChecks: number,
+  detail?: string
+): Promise<void> {
+  const { error } = await getSupabase()
+    .from('monitor_runs')
+    .update({
+      status,
+      completed_checks: completedChecks,
+      completed_at: new Date().toISOString(),
+      detail: detail || null,
+    })
+    .eq('run_key', runKey);
+  if (error) throw new Error(`Could not finish monitor run: ${error.message}`);
+}
+
+export async function runRetention(): Promise<void> {
+  const { error } = await getSupabase().rpc('cleanup_old_monitoring_data');
+  if (error) throw new Error(`Retention cleanup failed: ${error.message}`);
 }

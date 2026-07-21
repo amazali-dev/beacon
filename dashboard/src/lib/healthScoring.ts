@@ -78,12 +78,17 @@ function ratioScore(passed: number, total: number): number | null {
 
 /** Only a definite HTTP 429 is excluded. A 503 is treated as site unavailability. */
 export function isMonitorRateLimit(check: LoadCheck): boolean {
-  return check.status_code === 429;
+  return check.status_code === 429 || check.outcome === 'rate_limited';
+}
+
+export function isMonitorError(check: LoadCheck): boolean {
+  return check.outcome === 'monitor_error';
 }
 
 export function isAvailableVisit(check: LoadCheck): boolean {
   return (
     check.loaded === true &&
+    !isMonitorError(check) &&
     check.status_code !== null &&
     check.status_code >= 200 &&
     check.status_code < 400
@@ -124,7 +129,9 @@ export function confidenceLabel(
 }
 
 export function calculateWebsiteHealth(checks: LoadCheck[]): WebsiteHealthScore {
-  const assessed = checks.filter((check) => !isMonitorRateLimit(check));
+  const assessed = checks.filter(
+    (check) => !isMonitorRateLimit(check) && !isMonitorError(check)
+  );
   const successful = assessed.filter(isAvailableVisit);
   const excludedRateLimits = checks.length - assessed.length;
 
@@ -227,6 +234,7 @@ export function calculateWebsiteHealth(checks: LoadCheck[]): WebsiteHealthScore 
 }
 
 export function isRateLimitedFormTest(test: FormTest): boolean {
+  if (test.outcome) return test.outcome === 'rate_limited';
   return /SKIPPED.*rate.?limit|CDN rate-limited|HTTP 429/i.test(test.notes || '');
 }
 
@@ -236,7 +244,12 @@ function formBooleanScore(values: Array<boolean | null>): number | null {
 }
 
 export function calculateFormHealth(forms: FormTest[]): FormHealthScore {
-  const assessed = forms.filter((form) => !isRateLimitedFormTest(form));
+  const assessed = forms.filter(
+    (form) =>
+      !isRateLimitedFormTest(form) &&
+      form.outcome !== 'monitor_error' &&
+      form.outcome !== 'skipped'
+  );
   const contactValues = assessed.map((form): boolean | null => {
     if (/name field fill failed|email field fill failed|phone field fill failed/i.test(form.notes || '')) {
       return false;

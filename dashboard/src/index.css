@@ -1795,6 +1795,26 @@ th {
   margin-top: 1rem;
 }
 
+.proxy-saved-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.proxy-saved-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.7rem;
+  background: var(--surface-soft);
+}
+
+.proxy-saved-row p {
+  margin: 0.25rem 0 0;
+}
+
 .report-loader {
   width: 2rem;
   height: 2rem;

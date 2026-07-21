@@ -3,6 +3,7 @@ import { queueAndTriggerJob } from '../lib/operations';
 import {
   loadProxyPoolStatus,
   parseProxyLines,
+  removeProxy,
   saveProxyPool,
   type ProxyPoolStatus,
 } from '../lib/proxies';
@@ -86,6 +87,23 @@ export function ProxySettings() {
     }
   }
 
+  async function removeSavedProxy(proxyId: string, label: string) {
+    if (!window.confirm(`Remove ${label} from the fallback pool?`)) return;
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const next = await removeProxy(proxyId);
+      setStatus(next);
+      setEnabled(next.enabled);
+      setMessage(`${label} removed. ${next.proxyCount} proxies remain.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not remove proxy');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div>
       <div className="page-head">
@@ -130,10 +148,36 @@ export function ProxySettings() {
           </li>
         </ol>
         <p className="section-hint">
-          Proxies rotate deterministically across sites, browser profiles, and scheduled runs.
-          A proxy is not used for genuine HTTP 503 or other website failures.
+          Each brand keeps one fallback during a workflow run; other brands receive different
+          proxies while capacity permits. HTTP 503 is never treated as a rate limit.
         </p>
       </section>
+
+      {status?.proxies.length ? (
+        <section className="ops-panel">
+          <h2>Saved proxies</h2>
+          <div className="proxy-saved-list">
+            {status.proxies.map((proxy) => (
+              <div key={proxy.id} className="proxy-saved-row">
+                <div>
+                  <strong>{proxy.label || 'Fallback proxy'}</strong>
+                  <p className="meta">
+                    {proxy.server}
+                    {proxy.username_hint ? ` · user ${proxy.username_hint}` : ''}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void removeSavedProxy(proxy.id, proxy.label || proxy.server)}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section className="ops-panel">
         <h2>Add proxies</h2>

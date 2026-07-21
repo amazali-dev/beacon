@@ -7,7 +7,7 @@ import { getEnv } from '../config.js';
 import { getSupabase } from '../db/supabase.js';
 import { sendHtmlEmail } from '../alerts/email.js';
 
-function easternDayBounds(now = new Date()): { start: Date; end: Date; label: string } {
+function easternDayBounds(now = new Date(), requestedLabel?: string): { start: Date; end: Date; label: string } {
   // Approximate Eastern offset (handles EST/EDT via Intl)
   const fmt = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York',
@@ -19,7 +19,7 @@ function easternDayBounds(now = new Date()): { start: Date; end: Date; label: st
   const y = parts.find((p) => p.type === 'year')!.value;
   const m = parts.find((p) => p.type === 'month')!.value;
   const d = parts.find((p) => p.type === 'day')!.value;
-  const label = `${y}-${m}-${d}`;
+  const label = requestedLabel || `${y}-${m}-${d}`;
 
   // Convert Eastern midnight ↔ next midnight to UTC via Date parsing trick
   const start = new Date(
@@ -62,6 +62,18 @@ function easternLocalToUtc(dateLabel: string, time: string): Date {
   return new Date(base - offset);
 }
 
+async function signedScreenshotUrl(value: string | null): Promise<string | null> {
+  if (!value) return null;
+  const marker = '/storage/v1/object/public/screenshots/';
+  const path = value.includes(marker)
+    ? decodeURIComponent(value.slice(value.indexOf(marker) + marker.length))
+    : value.replace(/^screenshots\//, '');
+  const { data, error } = await getSupabase().storage
+    .from('screenshots')
+    .createSignedUrl(path, 7 * 24 * 60 * 60);
+  return error ? null : data.signedUrl;
+}
+
 type Verdict = 'HEALTHY' | 'DEGRADED' | 'BROKEN';
 
 function verdictFor(opts: {
@@ -74,9 +86,9 @@ function verdictFor(opts: {
   return 'HEALTHY';
 }
 
-export async function generateAndSendDailyReport(): Promise<void> {
+export async function generateAndSendDailyReport(reportDate?: string): Promise<void> {
   const sb = getSupabase();
-  const { start, end, label } = easternDayBounds();
+  const { start, end, label } = easternDayBounds(new Date(), reportDate);
   const weekAgo = new Date(start.getTime() - 7 * 24 * 60 * 60 * 1000);
 
   const { data: sites, error: sitesErr } = await sb
@@ -91,8 +103,9 @@ export async function generateAndSendDailyReport(): Promise<void> {
   for (const site of sites || []) {
     const { data: checks } = await sb
       .from('load_checks')
-      .select('profile,loaded,load_ms,lcp_ms,console_errors,checked_at')
+      .select('profile,loaded,load_ms,lcp_ms,console_errors,checked_at,status_code,outcome')
       .eq('site_id', site.id)
+      .eq('is_production', true)
       .gte('checked_at', start.toISOString())
       .lte('checked_at', end.toISOString());
 
@@ -100,13 +113,15 @@ export async function generateAndSendDailyReport(): Promise<void> {
       .from('load_checks')
       .select('lcp_ms')
       .eq('site_id', site.id)
+      .eq('is_production', true)
       .gte('checked_at', weekAgo.toISOString())
       .lt('checked_at', start.toISOString());
 
     const { data: forms } = await sb
       .from('form_tests')
-      .select('layer1_pass,layer2_pass,layer3_pass,submit_to_inbox_seconds,logo_upload_ok')
+      .select('layer1_pass,layer2_pass,layer3_pass,submit_to_inbox_seconds,logo_upload_ok,outcome')
       .eq('site_id', site.id)
+      .eq('is_production', true)
       .gte('tested_at', start.toISOString())
       .lte('tested_at', end.toISOString());
 
@@ -114,13 +129,19 @@ export async function generateAndSendDailyReport(): Promise<void> {
       .from('incidents')
       .select('type,detail,opened_at,closed_at,screenshot_path')
       .eq('site_id', site.id)
+      .eq('is_production', true)
       .gte('opened_at', start.toISOString())
       .lte('opened_at', end.toISOString())
       .order('opened_at', { ascending: false });
 
     const byProfile: Record<string, { total: number; ok: number; loads: number[]; lcps: number[] }> =
       {};
-    for (const c of checks || []) {
+    for (const c of (checks || []).filter(
+      (check) =>
+        check.status_code !== 429 &&
+        check.outcome !== 'rate_limited' &&
+        check.outcome !== 'monitor_error'
+    )) {
       const p = c.profile as string;
       byProfile[p] ||= { total: 0, ok: 0, loads: [], lcps: [] };
       byProfile[p].total += 1;
@@ -179,7 +200,9 @@ export async function generateAndSendDailyReport(): Promise<void> {
       .map(([t, n]) => `<li>${n}× ${escapeHtml(t)}</li>`)
       .join('');
 
-    const formList = forms || [];
+    const formList = (forms || []).filter(
+      (form) => form.outcome !== 'rate_limited' && form.outcome !== 'monitor_error'
+    );
     const l1 = formList.filter((f) => f.layer1_pass === true).length;
     const l2 = formList.filter((f) => f.layer2_pass === true).length;
     const formTotal = formList.length;
@@ -202,10 +225,16 @@ export async function generateAndSendDailyReport(): Promise<void> {
     const color =
       v === 'HEALTHY' ? '#0a7a32' : v === 'DEGRADED' ? '#a15c00' : '#b00020';
 
-    const incidentHtml = (incidents || [])
+    const incidentRows = await Promise.all(
+      (incidents || []).map(async (incident) => ({
+        ...incident,
+        signedScreenshot: await signedScreenshotUrl(incident.screenshot_path),
+      }))
+    );
+    const incidentHtml = incidentRows
       .map((i) => {
-        const shot = i.screenshot_path
-          ? ` · <a href="${i.screenshot_path}">screenshot</a>`
+        const shot = i.signedScreenshot
+          ? ` · <a href="${i.signedScreenshot}">screenshot</a>`
           : '';
         return `<li><strong>${escapeHtml(i.type)}</strong> ${escapeHtml(i.detail || '')} <em>(${i.opened_at}${i.closed_at ? ` → ${i.closed_at}` : ' — still open'})</em>${shot}</li>`;
       })

@@ -120,23 +120,6 @@ export async function runGeoGuard(): Promise<GeoGuardResult> {
     ip = hit.ip;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    // GitHub-hosted runners are US Azure — keep production + location label even if
-    // every public geo endpoint is down. Still better than skipping all checks.
-    if (gha && (mode === 'production' || forceProduction)) {
-      console.warn(`Geo lookup failed (${message}). Using GitHub Actions US runner fallback.`);
-      country = config.requiredCountry;
-      ip = ip || 'github-actions-runner';
-      return {
-        ok: true,
-        isUs: true,
-        country,
-        ip,
-        isProduction: forceProduction || mode === 'production',
-        deploymentMode: 'production',
-        stagingLabel,
-        warning: `Geo API unavailable; location assumed US (GitHub Actions). ${message}`,
-      };
-    }
     if (isStagingMode()) {
       console.log(
         `${stagingLabel}: geo lookup unavailable (${message}). Checks continue; data saved as staging.`
@@ -157,12 +140,6 @@ export async function runGeoGuard(): Promise<GeoGuardResult> {
         ? null
         : `Geo check failed (${message}). Results will NOT be marked as production.`,
     };
-  }
-
-  // On Actions we got an IP but no country (ipify-only) — hosted runners are US.
-  if (!country && gha && ip) {
-    country = config.requiredCountry;
-    console.log(`Country missing from geo APIs; assuming ${country} (GitHub Actions). IP=${ip}`);
   }
 
   const isUs = (country || '').toUpperCase() === config.requiredCountry.toUpperCase();

@@ -6,6 +6,20 @@ const HEALTH_ORDER: Record<Health, number> = {
   gray: 2,
   green: 3,
 };
+export const CURRENT_DATA_MAX_AGE_MS = 75 * 60 * 1000;
+
+function isExcludedMonitorResult(check: LoadCheck): boolean {
+  return check.status_code === 429 || check.outcome === 'rate_limited' || check.outcome === 'monitor_error';
+}
+
+function latestAssessedByProfile(checks: LoadCheck[]): LoadCheck[] {
+  const latest = new Map<string, LoadCheck>();
+  for (const check of checks) {
+    if (isExcludedMonitorResult(check) || latest.has(check.profile)) continue;
+    latest.set(check.profile, check);
+  }
+  return [...latest.values()];
+}
 
 export function healthSortOrder(health: Health): number {
   return HEALTH_ORDER[health];
@@ -26,20 +40,21 @@ export function healthLabel(health: Health): string {
 
 export function healthFromChecks(checks: LoadCheck[], slowThresholdMs = 8000): Health {
   if (checks.length === 0) return 'gray';
-  const latestByProfile = new Map<string, LoadCheck>();
-  for (const c of checks) {
-    if (!latestByProfile.has(c.profile)) latestByProfile.set(c.profile, c);
+  const latest = latestAssessedByProfile(checks);
+  if (!latest.length) return 'gray';
+  if (
+    latest.some(
+      (check) => Date.now() - new Date(check.checked_at).getTime() > CURRENT_DATA_MAX_AGE_MS
+    )
+  ) {
+    return 'gray';
   }
-  const latest = [...latestByProfile.values()];
   const hardFail = latest.some(
     (c) =>
       (!c.loaded || (c.status_code ?? 0) >= 400) &&
       c.status_code !== 429
   );
   if (hardFail) return 'red';
-  // A definite 429 is a monitor/CDN block, not confirmed website downtime.
-  // A 503 remains a hard failure because it can be real service unavailability.
-  if (latest.some((c) => c.status_code === 429)) return 'yellow';
   if (
     latest.some(
       (c) =>
@@ -55,20 +70,16 @@ export function healthFromChecks(checks: LoadCheck[], slowThresholdMs = 8000): H
 
 export function healthReasons(checks: LoadCheck[], slowThresholdMs = 8000): string[] {
   if (checks.length === 0) return ['No load checks yet'];
-  const latestByProfile = new Map<string, LoadCheck>();
-  for (const c of checks) {
-    if (!latestByProfile.has(c.profile)) latestByProfile.set(c.profile, c);
-  }
+  const latest = latestAssessedByProfile(checks);
+  if (!latest.length) return ['No recent assessed visits — monitor was blocked or could not run'];
   const reasons: string[] = [];
-  for (const c of latestByProfile.values()) {
+  for (const c of latest) {
+    if (Date.now() - new Date(c.checked_at).getTime() > CURRENT_DATA_MAX_AGE_MS) {
+      reasons.push(`${profileLabel(c.profile)}: data is stale (${formatAge(c.checked_at)})`);
+      continue;
+    }
     if (!c.loaded || (c.status_code ?? 0) >= 400) {
-      if (c.status_code === 429) {
-        reasons.push(
-          `${profileLabel(c.profile)}: site rate-limited the checker (HTTP ${c.status_code})`
-        );
-      } else {
-        reasons.push(`${profileLabel(c.profile)}: site did not load`);
-      }
+      reasons.push(`${profileLabel(c.profile)}: site did not load`);
     } else if (c.elements_ok?.cta === false) {
       reasons.push(`${profileLabel(c.profile)}: Get a Quote button not found`);
     } else if (c.elements_ok?.quote_form === false) {
@@ -78,6 +89,11 @@ export function healthReasons(checks: LoadCheck[], slowThresholdMs = 8000): stri
     }
   }
   return reasons.length ? reasons : ['All profiles healthy'];
+}
+
+function formatAge(iso: string): string {
+  const minutes = Math.max(1, Math.round((Date.now() - new Date(iso).getTime()) / 60_000));
+  return minutes < 120 ? `${minutes} minutes old` : `${Math.round(minutes / 60)} hours old`;
 }
 
 export function profileLabel(profile: string): string {
@@ -128,7 +144,15 @@ export function formLayerLabels(test: FormTest): {
 }
 
 export function formTestSummary(test: FormTest): string {
-  if (test.notes && /SKIPPED.*rate.?limit|CDN rate-limited|HTTP 429/i.test(test.notes)) {
+  if (test.outcome === 'monitor_error') {
+    return 'Monitor could not complete this test';
+  }
+  if (
+    test.outcome === 'rate_limited' ||
+    (!test.outcome &&
+      test.notes &&
+      /SKIPPED.*rate.?limit|CDN rate-limited|HTTP 429/i.test(test.notes))
+  ) {
     return 'Skipped — site rate-limited (not a form failure)';
   }
 
@@ -190,21 +214,26 @@ export function formatRunLocation(row: {
   check_country?: string | null;
   check_ip?: string | null;
   is_production?: boolean | null;
+  proxy_used?: boolean | null;
 }): string {
   const country = (row.check_country || '').toUpperCase();
   const ip = row.check_ip || '';
   if (country && ip) {
     const place =
       country === 'US' ? `United States (${country})` : `Country ${country}`;
-    const kind = row.is_production ? 'GitHub Actions' : 'Local / non-production';
+    const kind = row.proxy_used
+      ? 'Fallback proxy egress'
+      : row.is_production
+        ? 'GitHub Actions'
+        : 'Local / non-production';
     return `${place} · IP ${ip} · ${kind}`;
   }
   if (country) {
     return country === 'US'
-      ? `United States (${country})${row.is_production ? ' · GitHub Actions' : ''}`
+      ? `United States (${country})${row.proxy_used ? ' · Fallback proxy egress' : row.is_production ? ' · GitHub Actions' : ''}`
       : `Country ${country}`;
   }
-  if (row.is_production === true) return 'US production (location not stored on this older run)';
+  if (row.is_production === true) return 'Production run (egress location not verified on this older row)';
   if (row.is_production === false) return 'Local / non-US test (location not stored on this older run)';
   return 'Location not recorded';
 }

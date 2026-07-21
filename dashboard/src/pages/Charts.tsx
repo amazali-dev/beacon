@@ -22,11 +22,11 @@ export function Charts() {
       .then(({ data }) => {
         const rows = (data || []) as Site[];
         setSites(rows);
-        if (!params.get('site') && rows[0]) {
+        if (!siteId && rows[0]) {
           setParams({ site: rows[0].id });
         }
       });
-  }, []);
+  }, [siteId, setParams]);
 
   useEffect(() => {
     if (!siteId) return;
@@ -35,6 +35,7 @@ export function Charts() {
       .from('load_checks')
       .select('*')
       .eq('site_id', siteId)
+      .eq('is_production', true)
       .gte('checked_at', since)
       .order('checked_at', { ascending: true })
       .then(({ data }) => setChecks((data || []) as LoadCheck[]));
@@ -51,7 +52,7 @@ export function Charts() {
           {siteId ? (
             <Link to={`/site/${siteId}?tab=speed`}>site detail → Speed</Link>
           ) : (
-            'a site from Overview'
+            'a site from Dashboard'
           )}
           .
         </p>

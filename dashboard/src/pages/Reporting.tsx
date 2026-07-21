@@ -321,6 +321,8 @@ export function Reporting() {
   const [evidenceType, setEvidenceType] = useState<'all' | 'visit' | 'form'>('all');
   const [evidencePage, setEvidencePage] = useState(1);
   const [modal, setModal] = useState<{ src: string; alt: string } | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [loadedAt, setLoadedAt] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -329,7 +331,10 @@ export function Reporting() {
 
     void loadReportData(days, selectedSiteId || undefined)
       .then((next) => {
-        if (!cancelled) setData(next);
+        if (!cancelled) {
+          setData(next);
+          setLoadedAt(new Date().toISOString());
+        }
       })
       .catch((err) => {
         if (!cancelled) {
@@ -343,7 +348,7 @@ export function Reporting() {
     return () => {
       cancelled = true;
     };
-  }, [days, selectedSiteId]);
+  }, [days, selectedSiteId, refreshKey]);
 
   useEffect(() => {
     setEvidencePage(1);
@@ -436,6 +441,10 @@ export function Reporting() {
           <span>Rolling {days === 1 ? '24 hours' : `${days} days`}</span>
           <span>Times in {TIME_LABEL}</span>
           <span>Production runs only</span>
+          <span>{loadedAt ? `Data as of ${formatPakistanTime(loadedAt)} ${TIME_LABEL}` : 'Loading current data'}</span>
+          <button type="button" disabled={loading} onClick={() => setRefreshKey((key) => key + 1)}>
+            Refresh data
+          </button>
         </div>
       </header>
 

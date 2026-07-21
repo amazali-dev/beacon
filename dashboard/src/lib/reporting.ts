@@ -2,7 +2,9 @@ import { supabase } from './supabase';
 import {
   calculateFormHealth,
   calculateWebsiteHealth,
+  HEALTH_SCORING_CONFIG,
   isAvailableVisit,
+  isMonitorError,
   isMonitorRateLimit,
   isRateLimitedFormTest,
   type FormHealthScore,
@@ -71,13 +73,13 @@ export type DailyFormReportPoint = {
 };
 
 const PAGE_SIZE = 1000;
-const SLOW_MS = 8000;
+const SLOW_MS = HEALTH_SCORING_CONFIG.performance.acceptableMaxMs;
 
 export function reportStartIso(days: ReportRangeDays): string {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 }
 
-async function fetchAllChecks(startIso: string, siteId?: string): Promise<LoadCheck[]> {
+async function fetchAllChecks(startIso: string, endIso: string, siteId?: string): Promise<LoadCheck[]> {
   const rows: LoadCheck[] = [];
 
   for (let from = 0; ; from += PAGE_SIZE) {
@@ -86,7 +88,9 @@ async function fetchAllChecks(startIso: string, siteId?: string): Promise<LoadCh
       .select('*')
       .eq('is_production', true)
       .gte('checked_at', startIso)
+      .lte('checked_at', endIso)
       .order('checked_at', { ascending: false })
+      .order('id', { ascending: false })
       .range(from, from + PAGE_SIZE - 1);
 
     if (siteId) query = query.eq('site_id', siteId);
@@ -101,7 +105,7 @@ async function fetchAllChecks(startIso: string, siteId?: string): Promise<LoadCh
   return rows;
 }
 
-async function fetchAllForms(startIso: string, siteId?: string): Promise<FormTest[]> {
+async function fetchAllForms(startIso: string, endIso: string, siteId?: string): Promise<FormTest[]> {
   const rows: FormTest[] = [];
 
   for (let from = 0; ; from += PAGE_SIZE) {
@@ -110,7 +114,9 @@ async function fetchAllForms(startIso: string, siteId?: string): Promise<FormTes
       .select('*')
       .eq('is_production', true)
       .gte('tested_at', startIso)
+      .lte('tested_at', endIso)
       .order('tested_at', { ascending: false })
+      .order('id', { ascending: false })
       .range(from, from + PAGE_SIZE - 1);
 
     if (siteId) query = query.eq('site_id', siteId);
@@ -130,13 +136,14 @@ export async function loadReportData(
   siteId?: string
 ): Promise<ReportData> {
   const startIso = reportStartIso(days);
+  const endIso = new Date().toISOString();
   // Always keep the full site list available for the report site selector.
   const sitesQuery = supabase.from('sites').select('*').order('name');
 
   const [{ data: siteRows, error: siteError }, checks, forms] = await Promise.all([
     sitesQuery,
-    fetchAllChecks(startIso, siteId),
-    fetchAllForms(startIso, siteId),
+    fetchAllChecks(startIso, endIso, siteId),
+    fetchAllForms(startIso, endIso, siteId),
   ]);
 
   if (siteError) throw new Error(`Could not load sites: ${siteError.message}`);
@@ -182,7 +189,8 @@ export function calculateReportMetrics(
   const formHealth = calculateFormHealth(forms);
   const successfulVisits = checks.filter(isSuccessfulVisit).length;
   const rateLimitedVisits = checks.filter(isRateLimitedVisit).length;
-  const assessedVisits = checks.length - rateLimitedVisits;
+  const monitorErrors = checks.filter(isMonitorError).length;
+  const assessedVisits = checks.length - rateLimitedVisits - monitorErrors;
   const failedVisits = assessedVisits - successfulVisits;
   const loadTimes = checks
     .filter(isSuccessfulVisit)

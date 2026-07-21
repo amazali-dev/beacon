@@ -8,7 +8,6 @@ const emptyForm = {
   name: '',
   main_url: '',
   quote_form_url: '',
-  extra_urls_text: '',
   form_testing_enabled: true,
   active: true,
 };
@@ -45,7 +44,6 @@ export function Settings() {
       name: site.name,
       main_url: site.main_url,
       quote_form_url: site.quote_form_url || '',
-      extra_urls_text: (site.extra_urls || []).join('\n'),
       form_testing_enabled: site.form_testing_enabled,
       active: site.active,
     });
@@ -64,10 +62,7 @@ export function Settings() {
       name: form.name.trim(),
       main_url: form.main_url.trim(),
       quote_form_url: form.quote_form_url.trim() || null,
-      extra_urls: form.extra_urls_text
-        .split('\n')
-        .map((s) => s.trim())
-        .filter(Boolean),
+      extra_urls: editing?.extra_urls || [],
       form_testing_enabled: form.form_testing_enabled,
       active: form.active,
     };
@@ -140,14 +135,6 @@ export function Settings() {
               value={form.quote_form_url}
               onChange={(e) => setForm({ ...form, quote_form_url: e.target.value })}
               placeholder="Often a different page than the homepage"
-            />
-          </label>
-          <label>
-            Extra pages to monitor (one URL per line, optional)
-            <textarea
-              rows={3}
-              value={form.extra_urls_text}
-              onChange={(e) => setForm({ ...form, extra_urls_text: e.target.value })}
             />
           </label>
           <label className="row">

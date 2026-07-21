@@ -6,12 +6,15 @@ name: Queued jobs
 on:
   schedule:
     # Backup poll — GitHub cron is often late; prefer manual Run workflow after dashboard click
-    - cron: '2,17,32,47 * * * *'
+    - cron: "2,17,32,47 * * * *"
   workflow_dispatch:
 
 concurrency:
   group: queued-jobs
   cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
   drain-queue:
@@ -23,12 +26,12 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: '22'
+          node-version: "22"
           cache: npm
           cache-dependency-path: engine/package-lock.json
 
@@ -36,7 +39,7 @@ jobs:
         run: npm ci
 
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         id: playwright-cache
         with:
           path: ~/.cache/ms-playwright
@@ -53,7 +56,7 @@ jobs:
       - name: Process dashboard job queue
         env:
           DEPLOYMENT_MODE: production
-          FORCE_PRODUCTION: 'true'
+          FORCE_PRODUCTION: "true"
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}

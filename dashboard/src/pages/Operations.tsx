@@ -3,13 +3,14 @@ import type { FormEvent } from 'react';
 import {
   engineOnline,
   loadBeaconSettings,
+  loadOperationalAlerts,
   loadRecentJobs,
   queueAndTriggerJob,
   saveBeaconSettings,
-  saveGithubDispatchToken,
   type BeaconSettings,
   type CheckJob,
   type JobType,
+  type OperationalAlert,
 } from '../lib/operations';
 import {
   easternHmToPakistanHm,
@@ -59,9 +60,9 @@ export function Operations() {
   const [settings, setSettings] = useState<BeaconSettings | null>(null);
   const [heartbeat, setHeartbeat] = useState<string | null>(null);
   const [engineMode, setEngineMode] = useState<string | null>(null);
-  const [hasGithubToken, setHasGithubToken] = useState(false);
-  const [tokenDraft, setTokenDraft] = useState('');
+  const [engineCommitSha, setEngineCommitSha] = useState<string | null>(null);
   const [jobs, setJobs] = useState<CheckJob[]>([]);
+  const [operationalAlerts, setOperationalAlerts] = useState<OperationalAlert[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -70,13 +71,17 @@ export function Operations() {
 
   const refresh = useCallback(async () => {
     try {
-      const [{ settings: s, heartbeat: hb, engineMode: mode, hasGithubToken: tok }, recent] =
-        await Promise.all([loadBeaconSettings(), loadRecentJobs()]);
+      const [
+        { settings: s, heartbeat: hb, engineMode: mode, lastLoadCompletedAt, engineCommitSha: sha },
+        recent,
+        alerts,
+      ] = await Promise.all([loadBeaconSettings(), loadRecentJobs(), loadOperationalAlerts()]);
       setSettings(s);
-      setHeartbeat(hb);
+      setHeartbeat(lastLoadCompletedAt || hb);
       setEngineMode(mode);
-      setHasGithubToken(tok);
+      setEngineCommitSha(sha);
       setJobs(recent);
+      setOperationalAlerts(alerts);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load operations data');
@@ -96,37 +101,10 @@ export function Operations() {
     setMessage(null);
     try {
       await saveBeaconSettings(settings);
-      if (tokenDraft.trim()) {
-        await saveGithubDispatchToken(tokenDraft);
-        setTokenDraft('');
-        setHasGithubToken(true);
-      }
       setMessage('Settings saved.');
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Save failed');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function onSaveTokenOnly(e: FormEvent) {
-    e.preventDefault();
-    if (!tokenDraft.trim()) {
-      setError('Paste your GitHub fine-grained PAT first.');
-      return;
-    }
-    setBusy(true);
-    setMessage(null);
-    setError(null);
-    try {
-      await saveGithubDispatchToken(tokenDraft);
-      setTokenDraft('');
-      setHasGithubToken(true);
-      setMessage('GitHub token saved. Run now buttons will start Actions immediately.');
-      await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save token');
     } finally {
       setBusy(false);
     }
@@ -139,7 +117,7 @@ export function Operations() {
     try {
       await queueAndTriggerJob(jobType);
       setMessage(
-        `"${label}" started on GitHub Actions (US). Status below updates as it runs — results appear on Overview when done.`
+        `"${label}" queued on GitHub Actions. Status below updates as it runs — results appear on Dashboard when done.`
       );
       await refresh();
     } catch (err) {
@@ -169,6 +147,23 @@ export function Operations() {
       {error && <p className="error">{error}</p>}
       {message && <p className="ok-msg">{message}</p>}
 
+      {operationalAlerts.length > 0 && (
+        <section className="ops-panel">
+          <h2>Scheduling alerts</h2>
+          {operationalAlerts.map((alert) => (
+            <div className="engine-status offline" key={alert.key}>
+              <span className="dot" />
+              <div>
+                <strong>{alert.key.replaceAll('_', ' ')}</strong>
+                <p className="meta">
+                  {alert.detail} Opened {formatRelativeTime(alert.opened_at)}.
+                </p>
+              </div>
+            </div>
+          ))}
+        </section>
+      )}
+
       <section className="ops-panel">
         <h2>Engine (GitHub Actions)</h2>
         <div className={`engine-status ${online ? 'online' : 'offline'}`}>
@@ -177,51 +172,25 @@ export function Operations() {
             <strong>{online ? 'Last US run received' : 'No recent US run'}</strong>
             <p className="meta">
               {online
-                ? `Heartbeat ${formatPakistanTime(heartbeat)} ${TIME_LABEL} (${formatRelativeTime(heartbeat)}) · ${engineMode || 'production'}`
+                ? `Last completed load run ${formatPakistanTime(heartbeat)} ${TIME_LABEL} (${formatRelativeTime(heartbeat)}) · ${engineMode || 'production'}${engineCommitSha ? ` · ${engineCommitSha.slice(0, 7)}` : ''}`
                 : 'Use Run now below, or wait for the next scheduled load check (~every 30 min).'}
             </p>
           </div>
         </div>
       </section>
 
-      {!hasGithubToken && (
-        <section className="ops-panel">
-          <h2>One-time setup — GitHub token</h2>
-          <p className="section-hint">
-            Same fine-grained PAT you used for cron-job.org: <strong>Actions: Read and write</strong>,{' '}
-            <strong>Contents: Read</strong>, repo <code>amazali-dev/beacon</code>. This lets Run now
-            start the workflow when you click (no GitHub tab).
-          </p>
-          <form className="settings-form" onSubmit={onSaveTokenOnly}>
-            <label>
-              GitHub fine-grained PAT
-              <input
-                type="password"
-                autoComplete="off"
-                value={tokenDraft}
-                onChange={(e) => setTokenDraft(e.target.value)}
-                placeholder="github_pat_…"
-              />
-            </label>
-            <button type="submit" className="primary" disabled={busy}>
-              {busy ? 'Saving…' : 'Save token'}
-            </button>
-          </form>
-        </section>
-      )}
-
       <section className="ops-panel">
         <h2>Production schedule (automatic)</h2>
         <ul className="schedule-readonly">
           <li>
-            <strong>Load checks</strong> — every 30 minutes
+            <strong>Load checks</strong> — every {settings?.loadCheckIntervalMinutes || 30} minutes
           </li>
           <li>
-            <strong>Form tests</strong> — 00:00, 06:00, 12:00, 18:00 US Eastern
+            <strong>Form tests</strong> — {settings?.formTestTimesEastern.join(', ') || 'not configured'} US Eastern
             {settings ? ` (≈ ${formTimesPkt} ${TIME_LABEL})` : ''}
           </li>
           <li>
-            <strong>Daily report</strong> — 23:30 US Eastern
+            <strong>Daily report</strong> — {settings?.dailyReportTimeEastern || 'not configured'} US Eastern
             {settings ? ` (≈ ${reportPkt} ${TIME_LABEL})` : ''}
           </li>
         </ul>
@@ -230,8 +199,7 @@ export function Operations() {
       <section className="ops-panel">
         <h2>Run now</h2>
         <p className="section-hint">
-          One click queues the job and starts GitHub Actions on a US runner.
-          {!hasGithubToken && ' Save the GitHub token above first.'}
+          One click securely queues the job through the server and starts GitHub Actions.
         </p>
         <div className="action-grid">
           {RUN_ACTIONS.map((a) => (
@@ -239,7 +207,7 @@ export function Operations() {
               key={a.jobType}
               type="button"
               className={`action-card ${a.primary ? 'primary' : ''}`}
-              disabled={!hasGithubToken || runningJob !== null}
+              disabled={runningJob !== null}
               onClick={() => void runNow(a.jobType, a.label)}
             >
               <strong>{runningJob === a.jobType ? 'Starting…' : a.label}</strong>
@@ -295,16 +263,6 @@ export function Operations() {
                 />
                 Skip email alerts during staging / local tests
               </label>
-              <label>
-                Replace GitHub Run now token (optional)
-                <input
-                  type="password"
-                  autoComplete="off"
-                  value={tokenDraft}
-                  onChange={(e) => setTokenDraft(e.target.value)}
-                  placeholder={hasGithubToken ? '•••••••• (leave blank to keep)' : 'github_pat_…'}
-                />
-              </label>
               <button type="submit" className="primary" disabled={busy}>
                 {busy ? 'Saving…' : 'Save alert settings'}
               </button>
@@ -316,7 +274,7 @@ export function Operations() {
       <section className="ops-panel table-wrap">
         <h2>Recent Run now jobs</h2>
         <p className="section-hint">
-          pending → running → done. When done, new rows show on Overview / Timeline.
+          pending → running → done. When done, new rows show on Dashboard / Timeline.
         </p>
         <table>
           <thead>

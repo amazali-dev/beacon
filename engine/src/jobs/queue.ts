@@ -15,7 +15,7 @@ import { runAllFormTests } from '../modules/form-test.js';
 import { runAllLoadChecks } from '../modules/load-check.js';
 import { generateAndSendDailyReport } from '../reports/daily.js';
 
-async function runJobType(jobType: CheckJobType): Promise<void> {
+async function runJobType(jobType: CheckJobType, siteId: string | null): Promise<void> {
   const geo = await runGeoGuard();
   await touchEngineHeartbeat(isStagingMode() ? 'staging' : getDeploymentMode(), {
     country: geo.country,
@@ -31,10 +31,10 @@ async function runJobType(jobType: CheckJobType): Promise<void> {
 
   switch (jobType) {
     case 'load_check':
-      await runAllLoadChecks({ geo });
+      await runAllLoadChecks({ geo, siteId });
       break;
     case 'form_test':
-      await runAllFormTests({ geo });
+      await runAllFormTests({ geo, siteId });
       break;
     case 'detect_forms':
       await detectFormsForAllSites();
@@ -53,7 +53,7 @@ export async function processPendingJobs(limit = 5): Promise<number> {
     if (!job) break;
     console.log(`\n=== Dashboard job: ${job.job_type} (${job.id}) ===`);
     try {
-      await runJobType(job.job_type);
+      await runJobType(job.job_type, job.site_id);
       await finishJob(job.id, true, 'Completed on GitHub Actions (US)');
       ran += 1;
     } catch (err) {

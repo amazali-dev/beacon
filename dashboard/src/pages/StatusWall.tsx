@@ -12,6 +12,7 @@ import {
   profileLabel,
 } from '../lib/labelMappers';
 import { engineOnline, loadBeaconSettings, type BeaconSettings } from '../lib/operations';
+import { isRateLimitedFormTest } from '../lib/healthScoring';
 import {
   formatCountdown,
   formatPakistanTime,
@@ -28,6 +29,7 @@ type SiteSummary = {
   reasons: string[];
   lastCheck: string | null;
   openIncidents: number;
+  hasCriticalIncident: boolean;
   latestForm: FormTest | null;
   desktopLoadMs: number | null;
 };
@@ -36,7 +38,8 @@ function buildSummaries(
   sites: Site[],
   checks: LoadCheck[],
   incidents: Incident[],
-  formTests: FormTest[]
+  formTests: FormTest[],
+  slowThresholdMs: number
 ): SiteSummary[] {
   const checksBySite = new Map<string, LoadCheck[]>();
   for (const c of checks) {
@@ -46,9 +49,13 @@ function buildSummaries(
   }
 
   const openBySite = new Map<string, number>();
+  const criticalBySite = new Map<string, boolean>();
   for (const i of incidents) {
     if (!i.closed_at) {
       openBySite.set(i.site_id, (openBySite.get(i.site_id) || 0) + 1);
+      if (['load_failure', 'load_check_failure', 'form_test_failure'].includes(i.type)) {
+        criticalBySite.set(i.site_id, true);
+      }
     }
   }
 
@@ -59,14 +66,15 @@ function buildSummaries(
 
   return sites.map((site) => {
     const siteChecks = checksBySite.get(site.id) || [];
-    const health = site.active ? healthFromChecks(siteChecks) : 'gray';
+    const health = site.active ? healthFromChecks(siteChecks, slowThresholdMs) : 'gray';
     const desktop = siteChecks.find((c) => c.profile === 'desktop');
     return {
       site,
       health,
-      reasons: healthReasons(siteChecks),
+      reasons: healthReasons(siteChecks, slowThresholdMs),
       lastCheck: siteChecks[0]?.checked_at ?? null,
       openIncidents: openBySite.get(site.id) || 0,
+      hasCriticalIncident: criticalBySite.get(site.id) || false,
       latestForm: latestFormBySite.get(site.id) ?? null,
       desktopLoadMs: desktop?.load_ms ?? siteChecks[0]?.load_ms ?? null,
     };
@@ -74,8 +82,14 @@ function buildSummaries(
 }
 
 function effectiveHealth(summary: SiteSummary): Health {
-  if (summary.openIncidents > 0) return 'red';
-  if (summary.latestForm && !formTestPassed(summary.latestForm)) return 'yellow';
+  if (summary.hasCriticalIncident && summary.health !== 'gray') return 'red';
+  if (summary.openIncidents > 0 && summary.health === 'green') return 'yellow';
+  if (
+    summary.latestForm &&
+    !isRateLimitedFormTest(summary.latestForm) &&
+    summary.latestForm.outcome !== 'monitor_error' &&
+    !formTestPassed(summary.latestForm)
+  ) return 'yellow';
   return summary.health;
 }
 
@@ -138,7 +152,7 @@ function NextRunTimers({
   );
 }
 
-export function Overview() {
+export function Dashboard() {
   const [sites, setSites] = useState<Site[]>([]);
   const [checks, setChecks] = useState<LoadCheck[]>([]);
   const [incidents, setIncidents] = useState<Incident[]>([]);
@@ -149,6 +163,7 @@ export function Overview() {
   const [geoLabel, setGeoLabel] = useState<string | null>(null);
   const [geoIp, setGeoIp] = useState<string | null>(null);
   const [geoSource, setGeoSource] = useState<string | null>(null);
+  const [engineCommitSha, setEngineCommitSha] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -166,17 +181,20 @@ export function Overview() {
         supabase
           .from('load_checks')
           .select('*')
+          .eq('is_production', true)
           .order('checked_at', { ascending: false })
           .limit(300),
         supabase
           .from('incidents')
           .select('*')
+          .eq('is_production', true)
           .is('closed_at', null)
           .order('opened_at', { ascending: false })
           .limit(100),
         supabase
           .from('form_tests')
           .select('*')
+          .eq('is_production', true)
           .order('tested_at', { ascending: false })
           .limit(200),
         loadBeaconSettings().catch(() => ({
@@ -187,6 +205,8 @@ export function Overview() {
           geoIp: null,
           geoLabel: null,
           geoSource: null,
+          lastLoadCompletedAt: null,
+          engineCommitSha: null,
         })),
       ]);
       if (cancelled) return;
@@ -198,12 +218,13 @@ export function Overview() {
       setChecks((checkRows || []) as LoadCheck[]);
       setIncidents((incRows || []) as Incident[]);
       setFormTests((formRows || []) as FormTest[]);
-      setHeartbeat(loaded.heartbeat);
+      setHeartbeat(loaded.lastLoadCompletedAt || loaded.heartbeat);
       setEngineMode(loaded.engineMode);
       setSettings(loaded.settings ?? null);
       setGeoLabel(loaded.geoLabel);
       setGeoIp(loaded.geoIp);
       setGeoSource(loaded.geoSource);
+      setEngineCommitSha(loaded.engineCommitSha);
       setError(null);
     }
     void load();
@@ -215,8 +236,15 @@ export function Overview() {
   }, []);
 
   const summaries = useMemo(
-    () => buildSummaries(sites, checks, incidents, formTests),
-    [sites, checks, incidents, formTests]
+    () =>
+      buildSummaries(
+        sites,
+        checks,
+        incidents,
+        formTests,
+        settings?.loadTimeThresholdMs || 8000
+      ),
+    [sites, checks, incidents, formTests, settings?.loadTimeThresholdMs]
   );
 
   const filtered = useMemo(() => {
@@ -244,7 +272,7 @@ export function Overview() {
   return (
     <div>
       <div className="page-head">
-        <h1>Overview</h1>
+        <h1>Dashboard</h1>
         <p>What needs attention right now across your quote sites.</p>
       </div>
 
@@ -278,7 +306,7 @@ export function Overview() {
           <strong>{online ? 'Online' : 'Offline'}</strong>
           <span>
             {online
-              ? `GitHub Actions · ${engineMode || 'production'} · ${formatRelativeTime(heartbeat)}`
+              ? `GitHub Actions · ${engineMode || 'production'} · ${formatRelativeTime(heartbeat)}${engineCommitSha ? ` · ${engineCommitSha.slice(0, 7)}` : ''}`
               : 'Waiting for next GitHub Actions run (every 30 min)'}
           </span>
         </div>
@@ -358,7 +386,11 @@ function SiteCard({ summary }: { summary: SiteSummary }) {
           <span>Form</span>
           <strong>
             {latestForm
-              ? formTestPassed(latestForm)
+              ? isRateLimitedFormTest(latestForm)
+                ? 'Skipped'
+                : latestForm.outcome === 'monitor_error'
+                  ? 'Monitor error'
+                : formTestPassed(latestForm)
                 ? 'Passed'
                 : 'Failed'
               : site.form_testing_enabled
@@ -395,5 +427,5 @@ function SiteCard({ summary }: { summary: SiteSummary }) {
   );
 }
 
-/** @deprecated use Overview — kept for route compatibility */
-export const StatusWall = Overview;
+/** @deprecated use Dashboard — kept for route compatibility */
+export const StatusWall = Dashboard;

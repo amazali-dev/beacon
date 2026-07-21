@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { ScreenshotModal, ScreenshotThumb } from '../components/ScreenshotModal';
 import { formTestPassed, formTestSummary, formatRunLocation } from '../lib/labelMappers';
+import { isRateLimitedFormTest } from '../lib/healthScoring';
 import { formatPakistanTime, formatRelativeTime, TIME_LABEL } from '../lib/time';
 import type { FormTest, Site } from '../lib/types';
 
@@ -21,6 +22,7 @@ export function FormHistory() {
         supabase
           .from('form_tests')
           .select('*')
+          .eq('is_production', true)
           .order('tested_at', { ascending: false })
           .limit(150),
       ]);
@@ -39,8 +41,11 @@ export function FormHistory() {
     const q = query.trim().toLowerCase();
     return rows.filter((r) => {
       if (siteFilter && r.site_id !== siteFilter) return false;
-      if (resultFilter === 'pass' && !formTestPassed(r)) return false;
-      if (resultFilter === 'fail' && formTestPassed(r)) return false;
+      if (resultFilter === 'pass' && (r.outcome === 'monitor_error' || !formTestPassed(r))) return false;
+      if (
+        resultFilter === 'fail' &&
+        (formTestPassed(r) || isRateLimitedFormTest(r) || r.outcome === 'monitor_error')
+      ) return false;
       if (q && !`${r.run_id} ${r.notes || ''} ${siteMap[r.site_id] || ''}`.toLowerCase().includes(q)) {
         return false;
       }
@@ -55,8 +60,8 @@ export function FormHistory() {
         <p>Quote form submissions across all sites. Plain-language results with screenshots.</p>
         <p className="meta form-legend">
           <strong>Submit</strong> = form filled and thank-you appeared.{" "}
-          <strong>Email / Skipped</strong> = inbox checking is optional and currently off.{" "}
-          <strong>CRM / Skipped</strong> = not connected yet.
+          <strong>Email / Skipped</strong> = inbox verification was not assessed for that row.{" "}
+          <strong>CRM / Skipped</strong> = CRM verification was not assessed for that row.
         </p>
       </div>
 

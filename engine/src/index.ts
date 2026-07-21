@@ -12,10 +12,22 @@
  */
 
 import { getDeploymentMode, getStagingLabel, isStagingMode, loadConfig } from './config.js';
-import { hasSupabaseConfigured } from './db/supabase.js';
-import { touchEngineHeartbeat } from './db/settings.js';
+import { fetchActiveSites, hasSupabaseConfigured } from './db/supabase.js';
+import {
+  finishMonitorRun,
+  hydrateRuntimeSettings,
+  runRetention,
+  startMonitorRun,
+  touchEngineHeartbeat,
+} from './db/settings.js';
 import { runGeoGuard } from './geo-guard.js';
 import { processPendingJobs } from './jobs/queue.js';
+import {
+  claimDueDailySlot,
+  claimDueFormSlot,
+  completeScheduleSlot,
+} from './jobs/schedule-slots.js';
+import { runOperationalWatchdog } from './jobs/watchdog.js';
 import { runAllLoadChecks } from './modules/load-check.js';
 import { runAllFormTests } from './modules/form-test.js';
 import { detectFormsForAllSites } from './modules/form-detect.js';
@@ -52,6 +64,64 @@ function hasFlag(name: string): boolean {
   return process.argv.includes(name);
 }
 
+async function trackedRun(
+  jobType: string,
+  geo: GeoGuardResult,
+  expectedChecks: number,
+  run: () => Promise<number>
+): Promise<void> {
+  const runKey = `${process.env.GITHUB_RUN_ID || `local-${Date.now()}`}:${jobType}`;
+  await startMonitorRun({
+    runKey,
+    jobType,
+    isProduction: geo.isProduction,
+    country: geo.country,
+    ip: geo.ip,
+    expectedChecks,
+  });
+  try {
+    const completed = await run();
+    await finishMonitorRun(
+      runKey,
+      completed >= expectedChecks ? 'completed' : 'partial',
+      completed,
+      completed >= expectedChecks ? undefined : `Expected ${expectedChecks}; completed ${completed}`
+    );
+  } catch (err) {
+    await finishMonitorRun(
+      runKey,
+      'failed',
+      0,
+      err instanceof Error ? err.message : String(err)
+    );
+    throw err;
+  }
+}
+
+async function trackedDailyReport(reportDate?: string, suffix = 'manual'): Promise<void> {
+  const runKey = `${process.env.GITHUB_RUN_ID || `local-${Date.now()}`}:daily_report:${suffix}`;
+  await startMonitorRun({
+    runKey,
+    jobType: 'daily_report',
+    isProduction: getDeploymentMode() === 'production',
+    country: null,
+    ip: null,
+    expectedChecks: 1,
+  });
+  try {
+    await generateAndSendDailyReport(reportDate);
+    await finishMonitorRun(runKey, 'completed', 1);
+  } catch (err) {
+    await finishMonitorRun(
+      runKey,
+      'failed',
+      0,
+      err instanceof Error ? err.message : String(err)
+    );
+    throw err;
+  }
+}
+
 async function main(): Promise<void> {
   console.log('Beacon monitoring engine');
   console.log('------------------------');
@@ -66,6 +136,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  await hydrateRuntimeSettings();
   const config = loadConfig();
   console.log(
     `Config loaded. Mode=${getDeploymentMode()}, interval=${config.loadCheckIntervalMinutes}m, slow threshold=${config.loadTimeThresholdMs}ms`
@@ -100,7 +171,72 @@ async function main(): Promise<void> {
     const geo = await runGeoGuard();
     await bumpHeartbeat(geo);
     // Daily report still runs — it only emails existing US production rows
-    await generateAndSendDailyReport();
+    await trackedDailyReport();
+    return;
+  }
+
+  if (hasFlag('--retention')) {
+    await runRetention();
+    console.log('Monitoring retention cleanup completed.');
+    return;
+  }
+
+  if (hasFlag('--watchdog')) {
+    await runOperationalWatchdog();
+    console.log('Operational schedule watchdog completed.');
+    return;
+  }
+
+  if (hasFlag('--daily-slot')) {
+    const slot = await claimDueDailySlot();
+    if (!slot) {
+      console.log('No unclaimed daily-report slot is due.');
+      return;
+    }
+    try {
+      const geo = await runGeoGuard();
+      await bumpHeartbeat(geo);
+      await trackedDailyReport(slot.reportDate, slot.key);
+      await completeScheduleSlot('daily_report', slot.key, true);
+    } catch (err) {
+      await completeScheduleSlot(
+        'daily_report',
+        slot.key,
+        false,
+        err instanceof Error ? err.message : String(err)
+      );
+      throw err;
+    }
+    return;
+  }
+
+  if (hasFlag('--form-slot')) {
+    const slot = await claimDueFormSlot();
+    if (!slot) {
+      console.log('No unclaimed form-test slot is due.');
+      return;
+    }
+    try {
+      const geo = await runGeoGuard();
+      await bumpHeartbeat(geo);
+      if (shouldSkipProductionWrite(geo)) {
+        await completeScheduleSlot('form_test', slot, false, 'US egress not verified');
+        return;
+      }
+      const sites = (await fetchActiveSites()).filter((site) => site.form_testing_enabled);
+      await trackedRun(`form_test:${slot}`, geo, sites.length, () =>
+        runAllFormTests({ geo })
+      );
+      await completeScheduleSlot('form_test', slot, true);
+    } catch (err) {
+      await completeScheduleSlot(
+        'form_test',
+        slot,
+        false,
+        err instanceof Error ? err.message : String(err)
+      );
+      throw err;
+    }
     return;
   }
 
@@ -108,11 +244,16 @@ async function main(): Promise<void> {
     const geo = await runGeoGuard();
     await bumpHeartbeat(geo);
     if (shouldSkipProductionWrite(geo)) return;
-    await runAllFormTests({
-      geo,
-      oneSite: hasFlag('--one-site'),
-      headed: hasFlag('--headed'),
-    });
+    const sites = (await fetchActiveSites({ oneSite: hasFlag('--one-site') })).filter(
+      (site) => site.form_testing_enabled
+    );
+    await trackedRun('form_test', geo, sites.length, () =>
+      runAllFormTests({
+        geo,
+        oneSite: hasFlag('--one-site'),
+        headed: hasFlag('--headed'),
+      })
+    );
     return;
   }
 
@@ -120,11 +261,15 @@ async function main(): Promise<void> {
   const geo = await runGeoGuard();
   await bumpHeartbeat(geo);
   if (shouldSkipProductionWrite(geo)) return;
-  await runAllLoadChecks({
-    geo,
-    oneSite: hasFlag('--one-site'),
-    oneProfile: hasFlag('--one-profile'),
-  });
+  const sites = await fetchActiveSites({ oneSite: hasFlag('--one-site') });
+  const profileCount = hasFlag('--one-profile') ? 1 : 3;
+  await trackedRun('load_check', geo, sites.length * profileCount, () =>
+    runAllLoadChecks({
+      geo,
+      oneSite: hasFlag('--one-site'),
+      oneProfile: hasFlag('--one-profile'),
+    })
+  );
 }
 
 main().catch((err) => {

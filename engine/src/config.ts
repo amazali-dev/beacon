@@ -12,13 +12,19 @@ import type { EngineConfig } from './types.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // config.ts lives in engine/src → one level up is the engine folder
 const engineRoot = join(__dirname, '..');
+let runtimeOverrides: Partial<EngineConfig> = {};
 
 // Load .env from the engine folder (secrets stay on the machine, never in code)
 dotenv.config({ path: join(engineRoot, '.env') });
 
 export function loadConfig(): EngineConfig {
   const raw = readFileSync(join(engineRoot, 'config/defaults.json'), 'utf8');
-  return JSON.parse(raw) as EngineConfig;
+  return { ...(JSON.parse(raw) as EngineConfig), ...runtimeOverrides };
+}
+
+/** Apply validated Supabase settings for the lifetime of this process/run. */
+export function setRuntimeConfig(overrides: Partial<EngineConfig>): void {
+  runtimeOverrides = { ...runtimeOverrides, ...overrides };
 }
 
 export function getEnv(name: string, fallback = ''): string {

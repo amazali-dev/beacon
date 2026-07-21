@@ -5,7 +5,7 @@
  */
 
 import { devices, chromium, webkit, type Browser, type Page } from 'playwright';
-import { loadConfig } from '../config.js';
+import { getEnv, loadConfig } from '../config.js';
 import {
   closeIncident,
   countRecentSlowChecks,
@@ -21,6 +21,7 @@ import {
   verifyProxyEgress,
   type SelectedProxy,
 } from '../utils/proxy-pool.js';
+import { classifyCheckOutcome } from '../utils/outcomes.js';
 import { captureCheckScreenshot } from '../utils/screenshots.js';
 import { gotoWithRetries, sleep } from '../utils/navigate.js';
 import { maybeSendAlert } from '../alerts/email.js';
@@ -338,8 +339,14 @@ export async function runLoadCheckForSiteProfile(
   const config = loadConfig();
   const url = withMonitorParam(site.main_url);
   let attempt = await runLoadAttempt(site, profile, url);
+  const directStatus = attempt.statusCode;
+  let fallbackStatus: number | null = null;
+  let proxyUsed = false;
   let checkCountry = geo.country;
   let checkIp = geo.ip;
+  const productionEgressRequired = geo.deploymentMode === 'production';
+  let egressVerified =
+    !productionEgressRequired || (geo.isUs && Boolean(geo.country && geo.ip));
 
   if (attempt.statusCode === 429) {
     const proxy = await selectFallbackProxy(site.id);
@@ -347,8 +354,10 @@ export async function runLoadCheckForSiteProfile(
       console.log(`  direct attempt returned HTTP 429; retrying once via ${proxy.label}`);
       const directNote = attempt.notes || 'Direct attempt returned HTTP 429.';
       try {
+        proxyUsed = true;
         const fallback = await runLoadAttempt(site, profile, url, proxy);
-        if (fallback.statusCode === 429) markProxyBlocked(proxy);
+        fallbackStatus = fallback.statusCode;
+        if (fallback.statusCode === 429) await markProxyBlocked(proxy);
         fallback.notes =
           `Attempt 1 direct: HTTP 429. Attempt 2 ${proxy.label}: ` +
           `${fallback.statusCode ?? 'no response'}. ${fallback.notes || ''}`;
@@ -356,7 +365,21 @@ export async function runLoadCheckForSiteProfile(
         // Once proxy traffic is used, never mislabel it with the runner's direct IP.
         checkCountry = fallback.country;
         checkIp = fallback.ip;
+        egressVerified = productionEgressRequired
+          ? (fallback.country || '').toUpperCase() === config.requiredCountry.toUpperCase() &&
+            Boolean(fallback.ip)
+          : Boolean(fallback.ip);
+        if (!egressVerified) {
+          fallback.notes =
+            `${fallback.notes || ''} ` +
+            'Proxy egress was not verified in the required country; excluded from site health.';
+          await markProxyBlocked(proxy, 'Unknown or non-US proxy egress');
+        }
       } catch (err) {
+        await markProxyBlocked(
+          proxy,
+          `Fallback execution failed: ${err instanceof Error ? err.message : String(err)}`
+        );
         attempt.notes =
           `${directNote} Fallback ${proxy.label} could not run: ` +
           `${err instanceof Error ? err.message : String(err)}`;
@@ -380,6 +403,11 @@ export async function runLoadCheckForSiteProfile(
     consoleErrors,
     failedRequests,
   } = attempt;
+  const outcome = classifyCheckOutcome({
+    statusCode,
+    completedSuccessfully: loaded,
+    egressVerified,
+  });
 
   const result: LoadCheckResult = {
     siteId: site.id,
@@ -418,11 +446,26 @@ export async function runLoadCheckForSiteProfile(
     notes: result.notes,
     check_country: checkCountry,
     check_ip: checkIp,
+    outcome,
+    page_url: site.main_url,
+    workflow_run_id: getEnv('GITHUB_RUN_ID') || null,
+    commit_sha: getEnv('GITHUB_SHA') || null,
+    direct_status: directStatus,
+    fallback_status: fallbackStatus,
+    proxy_used: proxyUsed,
+    egress_verified: egressVerified,
   });
 
   // A definite 429 is a monitor/CDN block — record it, but do not call the site down.
   // A 503 follows the hard-failure path below because it can be real unavailability.
-  if (result.statusCode === 429) {
+  if (!egressVerified) {
+    await openIncident({
+      site_id: site.id,
+      type: 'check_failed_to_run',
+      detail: `${site.name} [${profile}] monitor egress could not be verified. ${result.notes || ''}`,
+      screenshot_path: result.screenshotPath,
+    });
+  } else if (result.statusCode === 429) {
     await closeIncident(site.id, 'load_failure');
     // Keep a single open rate_limited note (openIncident dedupes by open type if supported;
     // if not, we still avoid email spam via cooldown when we skip maybeSendAlert here)
@@ -446,6 +489,7 @@ export async function runLoadCheckForSiteProfile(
   } else {
     await closeIncident(site.id, 'load_failure');
     await closeIncident(site.id, 'rate_limited');
+    await closeIncident(site.id, 'check_failed_to_run');
   }
 
   if (!formExpectedOnMainPage(site) && result.elementsOk.cta === false) {
@@ -525,12 +569,13 @@ export async function runAllLoadChecks(opts: {
   geo: GeoGuardResult;
   oneSite?: boolean;
   oneProfile?: boolean;
-}): Promise<void> {
+  siteId?: string | null;
+}): Promise<number> {
   const { fetchActiveSites } = await import('../db/supabase.js');
-  const sites = await fetchActiveSites({ oneSite: opts.oneSite });
+  const sites = await fetchActiveSites({ oneSite: opts.oneSite, siteId: opts.siteId });
   if (sites.length === 0) {
     console.log('No active sites found in Supabase. Add sites in Settings or run the seed SQL.');
-    return;
+    return 0;
   }
 
   const profiles: DeviceProfile[] = opts.oneProfile
@@ -546,7 +591,8 @@ export async function runAllLoadChecks(opts: {
   const betweenProfiles = cfg.delayMsBetweenProfiles ?? 20000;
   const afterRateLimit = cfg.delayMsAfterRateLimit ?? 8000;
   const abortAfter = cfg.abortAfterConsecutiveRateLimits ?? 3;
-  let consecutiveBlockedOrUnavailable = 0;
+  let consecutiveRateLimits = 0;
+  let completedChecks = 0;
 
   // Profile outer loop: hit each site less often (desktop all sites → pause → Safari → …)
   for (let pi = 0; pi < profiles.length; pi++) {
@@ -560,6 +606,7 @@ export async function runAllLoadChecks(opts: {
         console.log(
           `  status=${result.statusCode} loaded=${result.loaded} loadMs=${result.loadMs} failed=${result.failed}`
         );
+        completedChecks += 1;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.error(`  CHECK FAILED TO RUN: ${message}`);
@@ -584,27 +631,35 @@ export async function runAllLoadChecks(opts: {
           notes: `check failed to run: ${message}`,
           check_country: opts.geo.country,
           check_ip: opts.geo.ip,
+          outcome: 'monitor_error',
+          page_url: site.main_url,
+          workflow_run_id: getEnv('GITHUB_RUN_ID') || null,
+          commit_sha: getEnv('GITHUB_SHA') || null,
+          egress_verified:
+            opts.geo.deploymentMode !== 'production' ||
+            (opts.geo.isUs && Boolean(opts.geo.ip)),
         });
+        completedChecks += 1;
       }
 
-      if (statusCode === 429 || statusCode === 503) {
-        consecutiveBlockedOrUnavailable += 1;
+      if (statusCode === 429) {
+        consecutiveRateLimits += 1;
         console.log(
-          `  blocked/unavailable streak ${consecutiveBlockedOrUnavailable}/${abortAfter}`
+          `  rate-limit streak ${consecutiveRateLimits}/${abortAfter}`
         );
-        if (consecutiveBlockedOrUnavailable >= abortAfter) {
+        if (consecutiveRateLimits >= abortAfter) {
           console.warn(
-            `\n!!! ABORTING LOAD CHECKS — ${abortAfter} consecutive HTTP 429/503 responses. ` +
-              `Stopping so this job does not run for 30+ minutes. Try again later or set PROXY_URL.\n`
+            `\n!!! ABORTING LOAD CHECKS — ${abortAfter} consecutive HTTP 429 responses. ` +
+              `Stopping to avoid escalating CDN blocking.\n`
           );
-          return;
+          return completedChecks;
         }
       } else if (statusCode !== null && statusCode >= 200 && statusCode < 400) {
-        consecutiveBlockedOrUnavailable = 0;
+        consecutiveRateLimits = 0;
       }
 
       const pause =
-        statusCode === 429 || statusCode === 503
+        statusCode === 429
           ? afterRateLimit
           : betweenChecks + Math.floor(Math.random() * 3000);
       console.log(`  pausing ${Math.round(pause / 1000)}s before next check…`);
@@ -615,4 +670,5 @@ export async function runAllLoadChecks(opts: {
       await sleep(betweenProfiles);
     }
   }
+  return completedChecks;
 }

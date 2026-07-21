@@ -342,20 +342,36 @@ export async function completeSignageQuoteSteps(
   return notes;
 }
 
-export async function clickQuoteSubmit(page: Page, selector?: string): Promise<void> {
-  const candidates = [
-    selector,
-    'button:has-text("Submit and Get Free Mockup")',
-    'button:has-text("Get my free mockup")',
-    'button:has-text("Get My Free Mockup")',
-    'button:has-text("Get a Quote")',
-    'button:has-text("Submit")',
-    'input[type="submit"]',
-    'button[type="submit"]',
-  ].filter(Boolean) as string[];
+export const QUOTE_SUBMIT_TEXT =
+  /submit(?:\s+now)?|submit.*(?:free\s+)?mockup|(?:get|request)(?:\s+my|\s+your|\s+a)?\s+(?:free\s+)?mockup|(?:get|request)\s+(?:a\s+)?quote/i;
 
-  for (const sel of candidates) {
-    const btn = page.locator(sel).first();
+export async function clickQuoteSubmit(page: Page, selector?: string): Promise<void> {
+  if (selector) {
+    const configured = page.locator(selector).first();
+    if (await configured.isVisible({ timeout: 1500 }).catch(() => false)) {
+      await configured.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+      await configured.click({ timeout: 10000 });
+      return;
+    }
+  }
+
+  const form = page.locator('form:visible').first();
+  const candidates = [
+    form.getByRole('button', { name: QUOTE_SUBMIT_TEXT }).first(),
+    page.getByRole('button', { name: QUOTE_SUBMIT_TEXT }).first(),
+    form
+      .locator('button, [role="button"], a')
+      .filter({ hasText: QUOTE_SUBMIT_TEXT })
+      .first(),
+    page
+      .locator('button, [role="button"], a')
+      .filter({ hasText: QUOTE_SUBMIT_TEXT })
+      .first(),
+    form.locator('button[type="submit"], input[type="submit"]').first(),
+    page.locator('button[type="submit"], input[type="submit"]').first(),
+  ];
+
+  for (const btn of candidates) {
     if (await btn.isVisible({ timeout: 1500 }).catch(() => false)) {
       await btn.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
       await btn.click({ timeout: 10000 });
@@ -363,7 +379,9 @@ export async function clickQuoteSubmit(page: Page, selector?: string): Promise<v
     }
   }
 
-  throw new Error('Submit button not found or not visible');
+  throw new Error(
+    'Required form submit control was not found or visible (expected Submit, Submit Now, Get Mockup, Get Free Mockup, or equivalent).'
+  );
 }
 
 export async function waitForThankYou(page: Page, timeoutMs: number): Promise<boolean> {

@@ -32,20 +32,23 @@ type Props = {
   formTests: FormTest[];
   incidents: Incident[];
   onOpenScreenshot: (src: string, alt: string) => void;
+  slowThresholdMs?: number;
 };
 
 function buildEvents(
   loadChecks: LoadCheck[],
   formTests: FormTest[],
-  incidents: Incident[]
+  incidents: Incident[],
+  slowThresholdMs: number
 ): TimelineEvent[] {
   const events: TimelineEvent[] = [];
 
   for (const c of loadChecks) {
-    const slow = (c.load_ms ?? 0) > 8000;
-    const rateLimited = c.status_code === 429;
+    const slow = (c.load_ms ?? 0) > slowThresholdMs;
+    const rateLimited = c.status_code === 429 || c.outcome === 'rate_limited';
+    const monitorError = c.outcome === 'monitor_error';
     const bad =
-      (!c.loaded || (c.status_code ?? 0) >= 400) && !rateLimited;
+      (!c.loaded || (c.status_code ?? 0) >= 400) && !rateLimited && !monitorError;
     const warn =
       rateLimited ||
       c.elements_ok?.cta === false ||
@@ -58,6 +61,8 @@ function buildEvents(
       title: `Load check · ${profileLabel(c.profile)}`,
       detail: bad
         ? `Failed to load (${c.status_code ?? 'no status'})`
+        : monitorError
+          ? 'Monitor could not complete this visit'
         : rateLimited
           ? `Site rate-limited checker (HTTP ${c.status_code})`
           : warn
@@ -116,7 +121,13 @@ function buildEvents(
   return events.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 }
 
-export function Timeline({ loadChecks, formTests, incidents, onOpenScreenshot }: Props) {
+export function Timeline({
+  loadChecks,
+  formTests,
+  incidents,
+  onOpenScreenshot,
+  slowThresholdMs = 8000,
+}: Props) {
   const [types, setTypes] = useState<Set<TimelineEventType>>(
     () => new Set(['load', 'form', 'incident'])
   );
@@ -125,14 +136,14 @@ export function Timeline({ loadChecks, formTests, incidents, onOpenScreenshot }:
   const [rateLimitedOnly, setRateLimitedOnly] = useState(false);
 
   const allEvents = useMemo(
-    () => buildEvents(loadChecks, formTests, incidents),
-    [loadChecks, formTests, incidents]
+    () => buildEvents(loadChecks, formTests, incidents, slowThresholdMs),
+    [loadChecks, formTests, incidents, slowThresholdMs]
   );
 
   const filtered = useMemo(() => {
     const since =
       timeframe === '24h'
-        ? sinceDays(1 / 24)
+        ? sinceDays(1)
         : timeframe === '7d'
           ? sinceDays(7)
           : timeframe === '30d'

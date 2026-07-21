@@ -8,12 +8,15 @@ name: Load checks
 on:
   schedule:
     # Offset from :00/:30 to reduce GitHub dropping jobs at busy times
-    - cron: '7,37 * * * *'
+    - cron: "7,37 * * * *"
   workflow_dispatch:
 
 concurrency:
   group: load-checks
   cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
   load-checks:
@@ -25,12 +28,12 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: '22'
+          node-version: "22"
           cache: npm
           cache-dependency-path: engine/package-lock.json
 
@@ -38,7 +41,7 @@ jobs:
         run: npm ci
 
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         id: playwright-cache
         with:
           path: ~/.cache/ms-playwright
@@ -61,10 +64,17 @@ jobs:
             "https://api.github.com/repos/${{ github.repository }}" > /dev/null
           echo "Keepalive OK at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
+      - name: Validate production configuration
+        env:
+          PRECHECK_KIND: load
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npm run preflight
+
       - name: Run load checks
         env:
           DEPLOYMENT_MODE: production
-          FORCE_PRODUCTION: 'true'
+          FORCE_PRODUCTION: "true"
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}

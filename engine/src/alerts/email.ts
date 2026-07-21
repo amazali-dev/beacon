@@ -5,7 +5,7 @@
 
 import nodemailer from 'nodemailer';
 import { getEnv, isStagingMode, loadConfig, getStagingLabel } from '../config.js';
-import { findOpenIncident, markIncidentAlerted } from '../db/supabase.js';
+import { findOpenIncident, getSupabase, markIncidentAlerted } from '../db/supabase.js';
 
 function smtpReady(): boolean {
   if (getEnv('RESEND_API_KEY')) return true;
@@ -104,9 +104,22 @@ export async function maybeSendAlert(opts: {
       }
     }
 
-    const screenshotHtml = opts.screenshotPath
-      ? `<p><img src="${opts.screenshotPath}" alt="Failure screenshot" style="max-width:100%;border:1px solid #ccc" /></p>
-       <p><a href="${opts.screenshotPath}">Open screenshot</a></p>`
+    let screenshotUrl: string | null = null;
+    if (opts.screenshotPath) {
+      const marker = '/storage/v1/object/public/screenshots/';
+      const path = opts.screenshotPath.includes(marker)
+        ? decodeURIComponent(
+            opts.screenshotPath.slice(opts.screenshotPath.indexOf(marker) + marker.length)
+          )
+        : opts.screenshotPath.replace(/^screenshots\//, '');
+      const { data } = await getSupabase().storage
+        .from('screenshots')
+        .createSignedUrl(path, 7 * 24 * 60 * 60);
+      screenshotUrl = data?.signedUrl || null;
+    }
+    const screenshotHtml = screenshotUrl
+      ? `<p><img src="${screenshotUrl}" alt="Failure screenshot" style="max-width:100%;border:1px solid #ccc" /></p>
+       <p><a href="${screenshotUrl}">Open screenshot</a></p>`
       : '<p>(No screenshot available)</p>';
 
     const html = `

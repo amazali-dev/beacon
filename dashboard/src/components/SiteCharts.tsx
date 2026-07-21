@@ -22,12 +22,12 @@ type Props = {
 
 export function SiteCharts({ checks, range, onRangeChange }: Props) {
   const chartData = useMemo(() => {
-    const map = new Map<string, Record<string, number | string>>();
+    const map = new Map<string, Record<string, number | string | null>>();
     for (const c of checks) {
       const key = formatPakistanChartTick(c.checked_at);
       const row = map.get(key) || { t: key };
-      row[`${c.profile}_load`] = c.load_ms ?? 0;
-      row[`${c.profile}_lcp`] = c.lcp_ms ?? 0;
+      row[`${c.profile}_load`] = c.load_ms;
+      row[`${c.profile}_lcp`] = c.lcp_ms;
       map.set(key, row);
     }
     return [...map.values()];

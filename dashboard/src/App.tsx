@@ -4,7 +4,7 @@ import type { Session } from '@supabase/supabase-js';
 import { Layout } from './components/Layout';
 import { supabase } from './lib/supabase';
 import { Login } from './pages/Login';
-import { Overview } from './pages/StatusWall';
+import { Dashboard } from './pages/StatusWall';
 import { Charts } from './pages/Charts';
 import { FormHistory } from './pages/FormHistory';
 import { HealthMethodology } from './pages/HealthMethodology';
@@ -42,7 +42,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route element={<Layout />}>
-          <Route index element={<Overview />} />
+          <Route index element={<Dashboard />} />
           <Route path="site/:siteId" element={<SiteDetail />} />
           <Route path="incidents" element={<IncidentsPage />} />
           <Route path="operations" element={<Operations />} />

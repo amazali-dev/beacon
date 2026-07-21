@@ -22,29 +22,66 @@ import { formatPakistanTime, formatRelativeTime, sinceDays, TIME_LABEL } from '.
 import type { FormTest, Incident, LoadCheck, Site } from '../lib/types';
 
 const TABS = [
-  { id: 'overview', label: 'Overview' },
+  { id: 'overview', label: 'Dashboard' },
   { id: 'visits', label: 'Visits' },
   { id: 'speed', label: 'Speed' },
   { id: 'forms', label: 'Forms' },
   { id: 'incidents', label: 'Incidents' },
   { id: 'timeline', label: 'Timeline' },
 ];
+const PAGE_SIZE = 1000;
 
-function loadCheckResultLabel(c: LoadCheck): string {
+async function fetchSiteChecks(siteId: string, since: string): Promise<LoadCheck[]> {
+  const rows: LoadCheck[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from('load_checks')
+      .select('*')
+      .eq('site_id', siteId)
+      .eq('is_production', true)
+      .gte('checked_at', since)
+      .order('checked_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    rows.push(...((data || []) as LoadCheck[]));
+    if ((data || []).length < PAGE_SIZE) return rows;
+  }
+}
+
+async function fetchSiteForms(siteId: string, since: string): Promise<FormTest[]> {
+  const rows: FormTest[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from('form_tests')
+      .select('*')
+      .eq('site_id', siteId)
+      .eq('is_production', true)
+      .gte('tested_at', since)
+      .order('tested_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    rows.push(...((data || []) as FormTest[]));
+    if ((data || []).length < PAGE_SIZE) return rows;
+  }
+}
+
+function loadCheckResultLabel(c: LoadCheck, slowThresholdMs: number): string {
   if (c.status_code === 429) {
     return `Rate limited (HTTP ${c.status_code})`;
   }
   if (!c.loaded || (c.status_code ?? 0) >= 400) {
     return `Failed (${c.status_code ?? 'no status'})`;
   }
-  const slow = (c.load_ms ?? 0) > 8000;
+  const slow = (c.load_ms ?? 0) > slowThresholdMs;
   return slow ? `Slow · ${c.load_ms}ms` : `OK · ${c.load_ms ?? '?'}ms`;
 }
 
-function loadCheckBadge(c: LoadCheck): 'ok' | 'bad' | 'muted' {
+function loadCheckBadge(c: LoadCheck, slowThresholdMs: number): 'ok' | 'bad' | 'muted' {
   if (c.status_code === 429) return 'muted';
   if (!c.loaded || (c.status_code ?? 0) >= 400) return 'bad';
-  if ((c.load_ms ?? 0) > 8000 || c.elements_ok?.cta === false || c.elements_ok?.quote_form === false) {
+  if ((c.load_ms ?? 0) > slowThresholdMs || c.elements_ok?.cta === false || c.elements_ok?.quote_form === false) {
     return 'muted';
   }
   return 'ok';
@@ -60,6 +97,9 @@ export function SiteDetail() {
   const [formTests, setFormTests] = useState<FormTest[]>([]);
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [chartRange, setChartRange] = useState<'24h' | '7d'>('24h');
+  const [slowThresholdMs, setSlowThresholdMs] = useState(8000);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [dataAsOf, setDataAsOf] = useState<string | null>(null);
   const [formFilter, setFormFilter] = useState<'all' | 'pass' | 'fail'>('all');
   const [formRateLimitedOnly, setFormRateLimitedOnly] = useState(false);
   const [formQuery, setFormQuery] = useState('');
@@ -76,28 +116,23 @@ export function SiteDetail() {
 
     async function load() {
       const since = sinceDays(30);
-      const [{ data: siteRow, error: sErr }, { data: checkRows }, { data: formRows }, { data: incRows }] =
+      const [{ data: siteRow, error: sErr }, checkRows, formRows, { data: incRows }, { data: thresholdRow }] =
         await Promise.all([
           supabase.from('sites').select('*').eq('id', siteId).maybeSingle(),
-          supabase
-            .from('load_checks')
-            .select('*')
-            .eq('site_id', siteId)
-            .gte('checked_at', since)
-            .order('checked_at', { ascending: false })
-            .limit(200),
-          supabase
-            .from('form_tests')
-            .select('*')
-            .eq('site_id', siteId)
-            .order('tested_at', { ascending: false })
-            .limit(100),
+          fetchSiteChecks(siteId, since),
+          fetchSiteForms(siteId, since),
           supabase
             .from('incidents')
             .select('*')
             .eq('site_id', siteId)
+            .eq('is_production', true)
             .order('opened_at', { ascending: false })
-            .limit(100),
+            .limit(500),
+          supabase
+            .from('app_settings')
+            .select('value')
+            .eq('key', 'loadTimeThresholdMs')
+            .maybeSingle(),
         ]);
 
       if (cancelled) return;
@@ -106,9 +141,11 @@ export function SiteDetail() {
         return;
       }
       setSite(siteRow as Site);
-      setChecks((checkRows || []) as LoadCheck[]);
-      setFormTests((formRows || []) as FormTest[]);
+      setChecks(checkRows);
+      setFormTests(formRows);
       setIncidents((incRows || []) as Incident[]);
+      setSlowThresholdMs(Number(thresholdRow?.value) || 8000);
+      setDataAsOf(new Date().toISOString());
       setError(null);
     }
 
@@ -118,10 +155,10 @@ export function SiteDetail() {
       cancelled = true;
       clearInterval(t);
     };
-  }, [siteId]);
+  }, [siteId, refreshKey]);
 
-  const health = site?.active ? healthFromChecks(checks) : 'gray';
-  const reasons = healthReasons(checks);
+  const health = site?.active ? healthFromChecks(checks, slowThresholdMs) : 'gray';
+  const reasons = healthReasons(checks, slowThresholdMs);
   const latestForm = formTests[0] ?? null;
   const openIncidents = incidents.filter((i) => !i.closed_at);
   const closedIncidents = incidents.filter((i) => i.closed_at);
@@ -147,9 +184,10 @@ export function SiteDetail() {
     const q = formQuery.trim().toLowerCase();
     return formTests.filter((f) => {
       const rateLimited = isRateLimitedFormTest(f);
+      const monitorError = f.outcome === 'monitor_error';
       if (formRateLimitedOnly ? !rateLimited : rateLimited) return false;
-      if (formFilter === 'pass' && (rateLimited || !formTestPassed(f))) return false;
-      if (formFilter === 'fail' && (rateLimited || formTestPassed(f))) return false;
+      if (formFilter === 'pass' && (rateLimited || monitorError || !formTestPassed(f))) return false;
+      if (formFilter === 'fail' && (rateLimited || monitorError || formTestPassed(f))) return false;
       if (q && !`${f.run_id} ${f.notes || ''}`.toLowerCase().includes(q)) return false;
       return true;
     });
@@ -159,13 +197,13 @@ export function SiteDetail() {
     return checks.filter((c) => {
       if (visitProfile !== 'all' && c.profile !== visitProfile) return false;
       if (visitRateLimitedOnly ? c.status_code !== 429 : c.status_code === 429) return false;
-      const badge = loadCheckBadge(c);
+      const badge = loadCheckBadge(c, slowThresholdMs);
       if (visitFilter === 'ok' && badge !== 'ok') return false;
       if (visitFilter === 'fail' && badge !== 'bad') return false;
-      if (visitFilter === 'slow' && !((c.load_ms ?? 0) > 8000 && c.loaded)) return false;
+      if (visitFilter === 'slow' && !((c.load_ms ?? 0) > slowThresholdMs && c.loaded)) return false;
       return true;
     });
-  }, [checks, visitProfile, visitFilter, visitRateLimitedOnly]);
+  }, [checks, visitProfile, visitFilter, visitRateLimitedOnly, slowThresholdMs]);
 
   function setTab(id: string) {
     setParams({ tab: id });
@@ -193,13 +231,22 @@ export function SiteDetail() {
       <div className="page-head site-head">
         <div>
           <Link className="subtle-link" to="/">
-            ← Overview
+            ← Dashboard
           </Link>
           <h1>{site.name}</h1>
           <p>
             <a href={site.main_url} target="_blank" rel="noreferrer">
               {site.main_url}
             </a>
+          </p>
+          <p className="meta">
+            {dataAsOf
+              ? `Production data as of ${formatPakistanTime(dataAsOf)} ${TIME_LABEL}`
+              : 'Loading current production data'}
+            {' · '}
+            <button type="button" onClick={() => setRefreshKey((key) => key + 1)}>
+              Refresh
+            </button>
           </p>
         </div>
         <div className={`health-pill health-${health}`}>
@@ -358,8 +405,8 @@ export function SiteDetail() {
                       <td>{profileLabel(c.profile)}</td>
                       <td className="notes-cell">{formatRunLocation(c)}</td>
                       <td>
-                        <span className={`badge ${loadCheckBadge(c)}`}>
-                          {loadCheckResultLabel(c)}
+                        <span className={`badge ${loadCheckBadge(c, slowThresholdMs)}`}>
+                          {loadCheckResultLabel(c, slowThresholdMs)}
                         </span>
                       </td>
                       <td className="notes-cell">{c.notes || '—'}</td>
@@ -440,7 +487,7 @@ export function SiteDetail() {
                     <td>
                       <span
                         className={`badge ${
-                          isRateLimitedFormTest(f)
+                          isRateLimitedFormTest(f) || f.outcome === 'monitor_error'
                             ? 'muted'
                             : formTestPassed(f)
                               ? 'ok'
@@ -527,6 +574,7 @@ export function SiteDetail() {
           formTests={formTests}
           incidents={incidents}
           onOpenScreenshot={openShot}
+          slowThresholdMs={slowThresholdMs}
         />
       )}
 

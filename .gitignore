@@ -14,8 +14,16 @@ dashboard/dist/
 credentials.json
 service-account*.json
 
-# Keep Supabase SQL on this PC only — never push to the public repo
-supabase/
+# Version secret-free schema migrations and Edge Functions. Keep local
+# Supabase state and private seed/config files out of the public repository.
+supabase/*
+!supabase/migrations/
+!supabase/migrations/*.sql
+!supabase/functions/
+!supabase/functions/**
+supabase/.temp/
+supabase/config.toml
+supabase/seed.sql
 
 # Private docs / setup notes — keep on this PC only
 MONITORING_PROJECT_SPEC.md
