@@ -9,7 +9,7 @@
  */
 
 import { join } from 'node:path';
-import { chromium } from 'playwright';
+import { chromium, type Locator, type Page } from 'playwright';
 import { engineRootPath, getEnv, getTestIdentity, isInboxVerificationEnabled, loadConfig } from '../config.js';
 import {
   fetchActiveSites,
@@ -55,6 +55,66 @@ async function ensureFormSelectors(site: SiteRow): Promise<SiteRow> {
   }
   const refreshed = await fetchActiveSites();
   return refreshed.find((s) => s.id === site.id) || site;
+}
+
+async function waitForLogoUploadState(
+  page: Page,
+  timeoutMs = 30_000
+): Promise<'success' | 'failed' | 'quiet'> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const failed = await page
+      .getByText(/failed\s*(?:to upload|[-—:]\s*network error)|upload failed|network error/i)
+      .first()
+      .isVisible()
+      .catch(() => false);
+    if (failed) return 'failed';
+
+    const succeeded = await page
+      .getByText(/upload(?:ed)? successfully|upload complete|logo uploaded/i)
+      .first()
+      .isVisible()
+      .catch(() => false);
+    if (succeeded) return 'success';
+
+    const uploading = await page
+      .getByText(/uploading/i)
+      .first()
+      .isVisible()
+      .catch(() => false);
+    if (!uploading && Date.now() - started >= 4_000) return 'quiet';
+    await page.waitForTimeout(500);
+  }
+  return 'failed';
+}
+
+async function uploadLogoWithRetry(
+  page: Page,
+  fileInput: Locator,
+  logoPath: string,
+  notes: string[]
+): Promise<boolean> {
+  await fileInput.setInputFiles(logoPath);
+
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const state = await waitForLogoUploadState(page);
+    if (state === 'success' || state === 'quiet') {
+      notes.push(attempt === 1 ? 'Logo upload accepted' : 'Logo upload accepted after retry');
+      return true;
+    }
+    if (attempt === 2) break;
+
+    notes.push('Logo upload reported a network failure; retrying once');
+    const retry = page.getByRole('button', { name: /retry/i }).first();
+    if (await retry.isVisible({ timeout: 1500 }).catch(() => false)) {
+      await retry.click({ timeout: 5000 });
+    } else {
+      await fileInput.setInputFiles(logoPath);
+    }
+  }
+
+  notes.push('Logo upload failed after one retry');
+  return false;
 }
 
 export async function runFormTestForSite(
@@ -207,8 +267,12 @@ export async function runFormTestForSite(
 
         if (selectors.file) {
           try {
-            await page.locator(selectors.file).first().setInputFiles(logoPath);
-            logoUploadOk = true;
+            logoUploadOk = await uploadLogoWithRetry(
+              page,
+              page.locator(selectors.file).first(),
+              logoPath,
+              notes
+            );
           } catch {
             logoUploadOk = false;
             notes.push('Logo upload failed');
@@ -217,8 +281,7 @@ export async function runFormTestForSite(
           const fileInput = page.locator('input[type="file"]').first();
           if (await fileInput.isVisible({ timeout: 2000 }).catch(() => false)) {
             try {
-              await fileInput.setInputFiles(logoPath);
-              logoUploadOk = true;
+              logoUploadOk = await uploadLogoWithRetry(page, fileInput, logoPath, notes);
             } catch {
               logoUploadOk = false;
               notes.push('Logo upload failed');
@@ -227,6 +290,9 @@ export async function runFormTestForSite(
             logoUploadOk = false;
             notes.push('No file upload field detected');
           }
+        }
+        if (logoUploadOk === false) {
+          throw new Error('Required logo upload failed after one retry');
         }
 
         notes.push(...(await completeSignageQuoteSteps(page, message)));
@@ -287,7 +353,9 @@ export async function runFormTestForSite(
       notes.push(`SKIPPED due to rate limit: ${msg}`);
     } else {
       const requiredFormControlFailed =
-        /required form submit control|required contact fields|field fill failed/i.test(msg);
+        /required form submit control|required contact fields|required logo upload|field fill failed/i.test(
+          msg
+        );
       if (requiredFormControlFailed) {
         layer1 = false;
         monitorError = false;
