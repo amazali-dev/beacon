@@ -157,7 +157,13 @@ function ScoreRow({ component }: { component: ScoreComponent }) {
   );
 }
 
-function HealthBreakdown({ metrics }: { metrics: ReportMetrics }) {
+export function HealthBreakdown({
+  metrics,
+  methodologyOpen = false,
+}: {
+  metrics: ReportMetrics;
+  methodologyOpen?: boolean;
+}) {
   const website = metrics.websiteHealth;
   const forms = metrics.formHealth;
 
@@ -214,7 +220,7 @@ function HealthBreakdown({ metrics }: { metrics: ReportMetrics }) {
         </div>
       </div>
 
-      <details className="health-methodology">
+      <details className="health-methodology" open={methodologyOpen}>
         <summary>
           <span aria-hidden>ⓘ</span> How health is calculated
         </summary>
@@ -416,6 +422,14 @@ export function Reporting() {
               : 'All monitored sites, combined into one production health report.'}
           </p>
         </div>
+        <Link
+          className="report-method-link"
+          to={`/reports/methodology?days=${days}${selectedSiteId ? `&site=${encodeURIComponent(selectedSiteId)}` : ''}`}
+        >
+          <span aria-hidden>ⓘ</span>
+          How health is calculated
+          <b aria-hidden>→</b>
+        </Link>
         <div className="report-hero-meta">
           <span>Rolling {days === 1 ? '24 hours' : `${days} days`}</span>
           <span>Times in {TIME_LABEL}</span>
@@ -459,12 +473,6 @@ export function Reporting() {
         </button>
       )}
 
-      <p className="report-formula">
-        <strong>Overall health</strong> is a weighted score for availability, critical content,
-        performance and browser compatibility. HTTP 429 monitor blocks are excluded; HTTP 503
-        remains a failure. Open “How health is calculated” below for every parameter.
-      </p>
-
       {error && <p className="error">{error}</p>}
       {loading ? (
         <div className="report-loading">
@@ -474,7 +482,6 @@ export function Reporting() {
       ) : (
         <>
           <ReportMetricsGrid metrics={metrics} />
-          <HealthBreakdown metrics={metrics} />
 
           <section className="report-panel">
             <div className="report-section-head">

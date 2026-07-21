@@ -7,6 +7,7 @@ import { Login } from './pages/Login';
 import { Overview } from './pages/StatusWall';
 import { Charts } from './pages/Charts';
 import { FormHistory } from './pages/FormHistory';
+import { HealthMethodology } from './pages/HealthMethodology';
 import { IncidentsPage } from './pages/Incidents';
 import { Operations } from './pages/Operations';
 import { Reporting } from './pages/Reporting';
@@ -45,6 +46,7 @@ export default function App() {
           <Route path="incidents" element={<IncidentsPage />} />
           <Route path="operations" element={<Operations />} />
           <Route path="reports" element={<Reporting />} />
+          <Route path="reports/methodology" element={<HealthMethodology />} />
           <Route path="settings" element={<Settings />} />
           {/* Deep-link compatibility */}
           <Route path="charts" element={<Charts />} />

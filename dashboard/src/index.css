@@ -1025,6 +1025,73 @@ th {
   font-size: 0.45rem;
 }
 
+.report-method-link {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  z-index: 2;
+  display: inline-flex;
+  gap: 0.45rem;
+  align-items: center;
+  padding: 0.48rem 0.7rem;
+  border: 1px solid color-mix(in oklab, var(--accent) 45%, var(--line));
+  border-radius: 0.45rem;
+  color: var(--accent);
+  background: color-mix(in oklab, var(--bg0) 82%, transparent);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: 160ms ease;
+}
+
+.report-method-link:hover {
+  border-color: var(--accent);
+  color: var(--ink);
+  background: color-mix(in oklab, var(--accent) 15%, var(--bg0));
+  transform: translateY(-1px);
+}
+
+.report-method-link b {
+  font-size: 0.8rem;
+}
+
+.methodology-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 2rem;
+  padding: 1.25rem 1.4rem;
+  border: 1px solid var(--line);
+  border-radius: 0.7rem;
+  background:
+    linear-gradient(110deg, color-mix(in oklab, var(--accent) 12%, var(--panel)), var(--panel));
+}
+
+.methodology-hero h1 {
+  margin: 0.15rem 0 0.35rem;
+  font-size: clamp(1.6rem, 4vw, 2.25rem);
+}
+
+.methodology-hero p {
+  max-width: 48rem;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.methodology-hero p strong {
+  color: var(--ink);
+}
+
+.methodology-actions {
+  display: grid;
+  gap: 0.55rem;
+  justify-items: end;
+  color: var(--muted);
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
 .report-toolbar {
   display: flex;
   align-items: center;
@@ -1630,14 +1697,27 @@ th {
   }
 
   .report-hero,
+  .methodology-hero,
   .report-toolbar,
   .report-section-head {
     align-items: flex-start;
     flex-direction: column;
   }
 
+  .report-method-link {
+    position: relative;
+    top: auto;
+    right: auto;
+    order: 2;
+  }
+
   .report-hero-meta {
+    order: 3;
     text-align: left;
+  }
+
+  .methodology-actions {
+    justify-items: start;
   }
 
   .report-metrics {
