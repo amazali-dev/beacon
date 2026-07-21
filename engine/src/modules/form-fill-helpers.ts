@@ -343,14 +343,19 @@ export async function completeSignageQuoteSteps(
 }
 
 export const QUOTE_SUBMIT_TEXT =
-  /submit(?:\s+now)?|submit.*(?:free\s+)?mockup|(?:get|request)(?:\s+my|\s+your|\s+a)?\s+(?:free\s+)?mockup|(?:get|request)\s+(?:a\s+)?quote/i;
+  /submit(?:\s+now)?|submit.*mockups?|(?:get|request).*mockups?|(?:get|request).*quotes?/i;
 
 export async function clickQuoteSubmit(page: Page, selector?: string): Promise<void> {
   if (selector) {
     const configured = page.locator(selector).first();
     if (await configured.isVisible({ timeout: 1500 }).catch(() => false)) {
       await configured.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
-      await configured.click({ timeout: 10000 });
+      await page
+        .getByText(/uploading/i)
+        .first()
+        .waitFor({ state: 'hidden', timeout: 30000 })
+        .catch(() => {});
+      await configured.click({ timeout: 30000 });
       return;
     }
   }
@@ -374,7 +379,13 @@ export async function clickQuoteSubmit(page: Page, selector?: string): Promise<v
   for (const btn of candidates) {
     if (await btn.isVisible({ timeout: 1500 }).catch(() => false)) {
       await btn.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
-      await btn.click({ timeout: 10000 });
+      // File-upload widgets may keep the final CTA disabled while the image is uploading.
+      await page
+        .getByText(/uploading/i)
+        .first()
+        .waitFor({ state: 'hidden', timeout: 30000 })
+        .catch(() => {});
+      await btn.click({ timeout: 30000 });
       return;
     }
   }

@@ -41,6 +41,7 @@ test('recognizes common quote-form submit labels case-insensitively', () => {
     'Submit',
     'submit now',
     'Submit and Get Free Mockup',
+    'GET FREE QUOTES & MOCKUPS',
   ]) {
     assert.match(label, QUOTE_SUBMIT_TEXT);
   }
