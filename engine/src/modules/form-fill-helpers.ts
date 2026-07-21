@@ -179,6 +179,59 @@ async function verifyNameFilled(page: Page, name: string): Promise<boolean> {
   }, name);
 }
 
+export function phoneDigitsMatch(actual: string, expected: string): boolean {
+  const actualDigits = actual.replace(/\D/g, '');
+  const expectedDigits = expected.replace(/\D/g, '');
+  if (!actualDigits || !expectedDigits) return false;
+  const comparableLength = Math.min(10, expectedDigits.length);
+  return actualDigits.endsWith(expectedDigits.slice(-comparableLength));
+}
+
+const PHONE_INPUT_SELECTOR = [
+  'input[type="tel"]',
+  'input[name*="phone" i]',
+  'input[name*="mobile" i]',
+  'input[id*="phone" i]',
+  'input[id*="mobile" i]',
+  'input[placeholder*="phone" i]',
+  'input[placeholder*="mobile" i]',
+  'input[aria-label*="phone" i]',
+  'input[aria-label*="mobile" i]',
+  'input[inputmode="tel"]',
+].join(', ');
+
+async function verifyPhoneFilled(page: Page, phone: string): Promise<boolean> {
+  const inputs = page.locator(PHONE_INPUT_SELECTOR);
+  const count = await inputs.count();
+  for (let i = 0; i < count; i++) {
+    const value = await inputs.nth(i).inputValue().catch(() => '');
+    if (phoneDigitsMatch(value, phone)) return true;
+  }
+  return false;
+}
+
+export async function fillPhoneField(
+  page: Page,
+  phone: string,
+  selector?: string
+): Promise<boolean> {
+  const attempts: Array<() => Promise<boolean>> = [];
+  if (selector) attempts.push(() => fillInput(page, selector, phone));
+  attempts.push(
+    () => tryFillLocator(page.getByPlaceholder(/phone|mobile|contact number/i).first(), phone),
+    () => tryFillLocator(page.getByLabel(/phone|mobile|contact number/i).first(), phone),
+    () => tryFillLocator(page.locator(PHONE_INPUT_SELECTOR).first(), phone),
+    () => fillInputNearLabel(page, /phone|mobile|contact number/i, phone)
+  );
+
+  for (const attempt of attempts) {
+    if (await attempt().catch(() => false)) {
+      if (await verifyPhoneFilled(page, phone)) return true;
+    }
+  }
+  return false;
+}
+
 export async function fillNameField(page: Page, name: string, selector?: string): Promise<boolean> {
   const attempts: Array<() => Promise<boolean>> = [];
 
@@ -243,10 +296,7 @@ export async function fillContactFields(
   const emailOk = await fillEmailField(page, identity.email, selectors.email);
   if (!emailOk) notes.push('Email field fill failed');
 
-  let phoneOk = false;
-  if (selectors.phone) phoneOk = await fillInput(page, selectors.phone, identity.phone);
-  if (!phoneOk) phoneOk = await fillInputNearLabel(page, /phone/i, identity.phone);
-  if (!phoneOk) phoneOk = await tryFillLocator(page.locator('input[type="tel"]').first(), identity.phone);
+  const phoneOk = await fillPhoneField(page, identity.phone, selectors.phone);
   if (!phoneOk) notes.push('Phone field fill failed');
 }
 
