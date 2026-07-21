@@ -10,6 +10,7 @@ const links = [
   { to: '/reports', label: 'Reporting' },
   { to: '/incidents', label: 'Incidents', badgeKey: 'incidents' as const },
   { to: '/operations', label: 'Operations' },
+  { to: '/proxies', label: 'Proxies' },
   { to: '/settings', label: 'Sites' },
 ];
 

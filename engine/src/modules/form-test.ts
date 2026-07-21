@@ -22,6 +22,11 @@ import { verifyInboxForRunId } from './imap-verify.js';
 import { verifyLeadInCrm } from '../hooks/crm-layer3.js';
 import { getBrowserLaunchOptions } from '../utils/browser.js';
 import { withMonitorParam } from '../utils/monitor-param.js';
+import {
+  markProxyBlocked,
+  selectFallbackProxy,
+  verifyProxyEgress,
+} from '../utils/proxy-pool.js';
 import { captureFormScreenshot } from '../utils/screenshots.js';
 import { gotoWithRetries, pageLooksRateLimited, sleep } from '../utils/navigate.js';
 import {
@@ -68,6 +73,8 @@ export async function runFormTestForSite(
   let logoUploadOk: boolean | null = null;
   let screenshotPath: string | null = null;
   let rateLimited = false;
+  let checkCountry = geo.country;
+  let checkIp = geo.ip;
   const notes: string[] = [];
 
   if (!site.form_testing_enabled) {
@@ -79,13 +86,13 @@ export async function runFormTestForSite(
   const selectors = siteReady.form_selectors || {};
   const formUrl = withMonitorParam(siteReady.quote_form_url || siteReady.main_url);
 
-  const browser = await chromium.launch(
+  let browser = await chromium.launch(
     getBrowserLaunchOptions({
       headless: opts?.headed ? false : true,
       slowMo: opts?.headed ? 250 : 0,
-    })
+    }, null)
   );
-  const page = await browser.newPage({
+  let page = await browser.newPage({
     viewport: { width: 1440, height: 900 },
     locale: 'en-US',
     timezoneId: 'America/New_York',
@@ -93,11 +100,50 @@ export async function runFormTestForSite(
   const submittedAt = Date.now();
 
   try {
-    const maxAttempts = config.gotoMaxAttempts ?? 3;
-    const nav = await gotoWithRetries(page, formUrl, maxAttempts);
+    let nav = await gotoWithRetries(page, formUrl, 1);
     if (nav.note) notes.push(nav.note);
+    let navigationBlocked = nav.rateLimited || (await pageLooksRateLimited(page));
 
-    if (nav.rateLimited || (await pageLooksRateLimited(page))) {
+    if (navigationBlocked) {
+      const proxy = await selectFallbackProxy(`form:${site.id}`);
+      if (proxy) {
+        notes.push(
+          `Attempt 1 direct was rate-limited${nav.statusCode ? ` (HTTP ${nav.statusCode})` : ''}. Attempt 2 uses ${proxy.label}.`
+        );
+        console.log(`  direct form attempt was rate-limited; retrying once via ${proxy.label}`);
+        await browser.close();
+        browser = await chromium.launch(
+          getBrowserLaunchOptions(
+            {
+              headless: opts?.headed ? false : true,
+              slowMo: opts?.headed ? 250 : 0,
+            },
+            proxy.launch
+          )
+        );
+        const context = await browser.newContext({
+          viewport: { width: 1440, height: 900 },
+          locale: 'en-US',
+          timezoneId: 'America/New_York',
+        });
+        const egress = await verifyProxyEgress(context);
+        // Do not label proxied traffic with the GitHub runner's direct location.
+        checkCountry = egress.country;
+        checkIp = egress.ip;
+        console.log(
+          `  fallback ${proxy.label}: ${egress.country || 'unknown country'} / ${egress.ip || 'unknown IP'}`
+        );
+        page = await context.newPage();
+        nav = await gotoWithRetries(page, formUrl, 1);
+        notes.push(`Attempt 2 ${proxy.label}: HTTP ${nav.statusCode ?? 'no response'}.`);
+        navigationBlocked = nav.rateLimited || (await pageLooksRateLimited(page));
+        if (navigationBlocked) markProxyBlocked(proxy);
+      } else {
+        notes.push('No enabled fallback proxy was available.');
+      }
+    }
+
+    if (navigationBlocked) {
       rateLimited = true;
       notes.push(
         'SKIPPED: site/CDN rate-limited the form test (HTTP 429). Not counted as a form failure — will retry next slot.'
@@ -255,8 +301,8 @@ export async function runFormTestForSite(
     screenshot_path: screenshotPath,
     notes: notes.join(' | ') || null,
     is_production: geo.isProduction,
-    check_country: geo.country,
-    check_ip: geo.ip,
+    check_country: checkCountry,
+    check_ip: checkIp,
   });
 
   const submissionOnly = !isInboxVerificationEnabled();

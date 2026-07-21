@@ -15,6 +15,12 @@ import {
 import type { DeviceProfile, GeoGuardResult, LoadCheckResult, SiteRow } from '../types.js';
 import { getBrowserLaunchOptions } from '../utils/browser.js';
 import { withMonitorParam } from '../utils/monitor-param.js';
+import {
+  markProxyBlocked,
+  selectFallbackProxy,
+  verifyProxyEgress,
+  type SelectedProxy,
+} from '../utils/proxy-pool.js';
 import { captureCheckScreenshot } from '../utils/screenshots.js';
 import { gotoWithRetries, sleep } from '../utils/navigate.js';
 import { maybeSendAlert } from '../alerts/email.js';
@@ -130,7 +136,7 @@ async function checkElements(
   return result;
 }
 
-async function launchForProfile(profile: DeviceProfile): Promise<{
+async function launchForProfile(profile: DeviceProfile, proxy?: SelectedProxy): Promise<{
   browser: Browser;
   contextOptions: Parameters<Browser['newContext']>[0];
 }> {
@@ -139,7 +145,7 @@ async function launchForProfile(profile: DeviceProfile): Promise<{
 
   if (profile === 'mobile' && profileCfg.device) {
     const device = devices[profileCfg.device];
-    const browser = await chromium.launch(getBrowserLaunchOptions());
+    const browser = await chromium.launch(getBrowserLaunchOptions({}, proxy?.launch ?? null));
     return {
       browser,
       contextOptions: { ...device, locale: 'en-US', timezoneId: 'America/New_York' },
@@ -147,7 +153,7 @@ async function launchForProfile(profile: DeviceProfile): Promise<{
   }
 
   if (profileCfg.browser === 'webkit') {
-    const browser = await webkit.launch(getBrowserLaunchOptions());
+    const browser = await webkit.launch(getBrowserLaunchOptions({}, proxy?.launch ?? null));
     return {
       browser,
       contextOptions: {
@@ -158,7 +164,7 @@ async function launchForProfile(profile: DeviceProfile): Promise<{
     };
   }
 
-  const browser = await chromium.launch(getBrowserLaunchOptions());
+  const browser = await chromium.launch(getBrowserLaunchOptions({}, proxy?.launch ?? null));
   return {
     browser,
     contextOptions: {
@@ -199,16 +205,29 @@ async function measureWebVitals(page: Page): Promise<{ lcpMs: number | null; cls
   }
 }
 
-export async function runLoadCheckForSiteProfile(
+type LoadAttempt = {
+  statusCode: number | null;
+  loaded: boolean;
+  loadMs: number | null;
+  lcpMs: number | null;
+  cls: number | null;
+  elementsOk: Record<string, boolean>;
+  screenshotPath: string | null;
+  notes: string | null;
+  consoleErrors: Array<{ type: string; text: string }>;
+  failedRequests: Array<{ url: string; status: number | null; error?: string }>;
+  country: string | null;
+  ip: string | null;
+};
+
+async function runLoadAttempt(
   site: SiteRow,
   profile: DeviceProfile,
-  geo: GeoGuardResult
-): Promise<LoadCheckResult> {
-  const config = loadConfig();
-  const url = withMonitorParam(site.main_url);
-  const consoleErrors: Array<{ type: string; text: string }> = [];
-  const failedRequests: Array<{ url: string; status: number | null; error?: string }> = [];
-
+  url: string,
+  proxy?: SelectedProxy
+): Promise<LoadAttempt> {
+  const consoleErrors: LoadAttempt['consoleErrors'] = [];
+  const failedRequests: LoadAttempt['failedRequests'] = [];
   let statusCode: number | null = null;
   let loaded = false;
   let loadMs: number | null = null;
@@ -217,12 +236,22 @@ export async function runLoadCheckForSiteProfile(
   let elementsOk: Record<string, boolean> = {};
   let screenshotPath: string | null = null;
   let notes: string | null = null;
+  let country: string | null = null;
+  let ip: string | null = null;
 
-  const { browser, contextOptions } = await launchForProfile(profile);
+  const { browser, contextOptions } = await launchForProfile(profile, proxy);
   try {
     const context = await browser.newContext(contextOptions);
-    const page = await context.newPage();
+    if (proxy) {
+      const egress = await verifyProxyEgress(context);
+      country = egress.country;
+      ip = egress.ip;
+      console.log(
+        `  fallback ${proxy.label}: ${egress.country || 'unknown country'} / ${egress.ip || 'unknown IP'}`
+      );
+    }
 
+    const page = await context.newPage();
     page.on('console', (msg) => {
       if (msg.type() === 'error') {
         consoleErrors.push({ type: msg.type(), text: msg.text().slice(0, 500) });
@@ -246,8 +275,8 @@ export async function runLoadCheckForSiteProfile(
 
     const started = Date.now();
     try {
-      const maxAttempts = loadConfig().gotoMaxAttempts ?? 4;
-      const nav = await gotoWithRetries(page, url, maxAttempts);
+      // The outer direct/fallback flow owns the strict two-attempt limit.
+      const nav = await gotoWithRetries(page, url, 1);
       statusCode = nav.statusCode;
       loadMs = Date.now() - started;
       loaded = statusCode !== null && statusCode >= 200 && statusCode < 400;
@@ -258,27 +287,18 @@ export async function runLoadCheckForSiteProfile(
         lcpMs = vitals.lcpMs !== null ? Math.round(vitals.lcpMs) : null;
         cls = vitals.cls;
         elementsOk = await checkElements(page, site);
-      } else {
-        elementsOk = {};
       }
     } catch (err) {
-      loaded = false;
       loadMs = Date.now() - started;
       notes = err instanceof Error ? err.message : String(err);
     }
 
-    // Critical only for what this page is supposed to have:
-    // - separate form URL → homepage needs CTA
-    // - form on this page → needs the form (CTA not required)
     const missingCritical = formExpectedOnMainPage(site)
       ? elementsOk.quote_form === false
       : elementsOk.cta === false;
     const failed =
-      !loaded ||
-      (statusCode !== null && statusCode >= 400) ||
-      missingCritical;
+      !loaded || (statusCode !== null && statusCode >= 400) || missingCritical;
 
-    // Always capture for every profile (desktop / Safari / mobile) so Timeline can Preview
     try {
       screenshotPath = await captureCheckScreenshot(
         page,
@@ -289,11 +309,77 @@ export async function runLoadCheckForSiteProfile(
     } catch (err) {
       console.warn('Load-check screenshot failed:', err);
     }
-
     await context.close();
   } finally {
     await browser.close();
   }
+
+  return {
+    statusCode,
+    loaded,
+    loadMs,
+    lcpMs,
+    cls,
+    elementsOk,
+    screenshotPath,
+    notes,
+    consoleErrors: consoleErrors.slice(0, 50),
+    failedRequests: failedRequests.slice(0, 50),
+    country,
+    ip,
+  };
+}
+
+export async function runLoadCheckForSiteProfile(
+  site: SiteRow,
+  profile: DeviceProfile,
+  geo: GeoGuardResult
+): Promise<LoadCheckResult> {
+  const config = loadConfig();
+  const url = withMonitorParam(site.main_url);
+  let attempt = await runLoadAttempt(site, profile, url);
+  let checkCountry = geo.country;
+  let checkIp = geo.ip;
+
+  if (attempt.statusCode === 429) {
+    const proxy = await selectFallbackProxy(`load:${site.id}:${profile}`);
+    if (proxy) {
+      console.log(`  direct attempt returned HTTP 429; retrying once via ${proxy.label}`);
+      const directNote = attempt.notes || 'Direct attempt returned HTTP 429.';
+      try {
+        const fallback = await runLoadAttempt(site, profile, url, proxy);
+        if (fallback.statusCode === 429) markProxyBlocked(proxy);
+        fallback.notes =
+          `Attempt 1 direct: HTTP 429. Attempt 2 ${proxy.label}: ` +
+          `${fallback.statusCode ?? 'no response'}. ${fallback.notes || ''}`;
+        attempt = fallback;
+        // Once proxy traffic is used, never mislabel it with the runner's direct IP.
+        checkCountry = fallback.country;
+        checkIp = fallback.ip;
+      } catch (err) {
+        attempt.notes =
+          `${directNote} Fallback ${proxy.label} could not run: ` +
+          `${err instanceof Error ? err.message : String(err)}`;
+      }
+    } else {
+      attempt.notes =
+        `${attempt.notes || 'Direct attempt returned HTTP 429.'} ` +
+        'No enabled fallback proxy was available.';
+    }
+  }
+
+  const {
+    statusCode,
+    loaded,
+    loadMs,
+    lcpMs,
+    cls,
+    elementsOk,
+    screenshotPath,
+    notes,
+    consoleErrors,
+    failedRequests,
+  } = attempt;
 
   const result: LoadCheckResult = {
     siteId: site.id,
@@ -330,8 +416,8 @@ export async function runLoadCheckForSiteProfile(
     screenshot_path: result.screenshotPath,
     is_production: geo.isProduction,
     notes: result.notes,
-    check_country: geo.country,
-    check_ip: geo.ip,
+    check_country: checkCountry,
+    check_ip: checkIp,
   });
 
   // A definite 429 is a monitor/CDN block — record it, but do not call the site down.

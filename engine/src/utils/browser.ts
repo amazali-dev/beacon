@@ -12,11 +12,13 @@
 import type { LaunchOptions } from 'playwright';
 import { getEnv } from '../config.js';
 
-function parseProxy(
+export type BrowserProxy = NonNullable<LaunchOptions['proxy']>;
+
+export function parseProxy(
   raw: string,
   userFromEnv: string,
   passFromEnv: string
-): NonNullable<LaunchOptions['proxy']> | undefined {
+): BrowserProxy | undefined {
   const trimmed = raw.trim();
   if (!trimmed) return undefined;
 
@@ -48,19 +50,25 @@ function parseProxy(
   }
 }
 
-/** Launch options used by every check that opens a browser */
-export function getBrowserLaunchOptions(
-  overrides: LaunchOptions = {}
-): LaunchOptions {
-  const proxy = parseProxy(
+export function getEnvironmentProxy(): BrowserProxy | undefined {
+  return parseProxy(
     getEnv('PROXY_URL'),
     getEnv('PROXY_USERNAME'),
     getEnv('PROXY_PASSWORD')
   );
+}
+
+/** Launch options used by every check that opens a browser */
+export function getBrowserLaunchOptions(
+  overrides: LaunchOptions = {},
+  proxyOverride?: BrowserProxy | null
+): LaunchOptions {
+  // undefined preserves the legacy PROXY_URL behavior; null explicitly means direct.
+  const proxy = proxyOverride === undefined ? getEnvironmentProxy() : proxyOverride || undefined;
 
   if (proxy) {
     console.log(
-      `PROXY_URL is set — browser traffic via ${proxy.server}` +
+      `Browser proxy: ${proxy.server}` +
         (proxy.username ? ' (authenticated)' : '')
     );
   }

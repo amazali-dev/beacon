@@ -10,6 +10,7 @@ import { FormHistory } from './pages/FormHistory';
 import { HealthMethodology } from './pages/HealthMethodology';
 import { IncidentsPage } from './pages/Incidents';
 import { Operations } from './pages/Operations';
+import { ProxySettings } from './pages/ProxySettings';
 import { Reporting } from './pages/Reporting';
 import { Settings } from './pages/Settings';
 import { SiteDetail } from './pages/SiteDetail';
@@ -45,6 +46,7 @@ export default function App() {
           <Route path="site/:siteId" element={<SiteDetail />} />
           <Route path="incidents" element={<IncidentsPage />} />
           <Route path="operations" element={<Operations />} />
+          <Route path="proxies" element={<ProxySettings />} />
           <Route path="reports" element={<Reporting />} />
           <Route path="reports/methodology" element={<HealthMethodology />} />
           <Route path="settings" element={<Settings />} />
