@@ -2,6 +2,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { nowPakistanClock, TIME_LABEL } from '../lib/time';
+import type { Site } from '../lib/types';
 import './layout.css';
 
 const links = [
@@ -14,6 +15,7 @@ const links = [
 export function Layout() {
   const [clock, setClock] = useState(nowPakistanClock());
   const [openIncidents, setOpenIncidents] = useState(0);
+  const [sites, setSites] = useState<Pick<Site, 'id' | 'name' | 'main_url' | 'active'>[]>([]);
   const location = useLocation();
 
   useEffect(() => {
@@ -28,6 +30,24 @@ export function Layout() {
       .is('closed_at', null)
       .then(({ count }) => setOpenIncidents(count || 0));
   }, [location.pathname]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void supabase
+      .from('sites')
+      .select('id,name,main_url,active')
+      .order('name')
+      .then(({ data, error }) => {
+        if (!cancelled && !error) {
+          setSites((data || []) as Pick<Site, 'id' | 'name' | 'main_url' | 'active'>[]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [location.pathname === '/settings']);
 
   return (
     <div className="shell">
@@ -67,14 +87,62 @@ export function Layout() {
           </button>
         </div>
       </header>
-      <main className="main">
-        {import.meta.env.VITE_BEACON_ENV !== 'production' && (
-          <div className="staging-banner" role="status">
-            Local dashboard view — production checks run on GitHub Actions (US). Refresh after a workflow finishes to see new data.
+      <div className="workspace">
+        <aside className="site-sidebar" aria-label="Monitored sites">
+          <div className="site-sidebar-head">
+            <div>
+              <span className="eyebrow">Monitor network</span>
+              <strong>Sites</strong>
+            </div>
+            <span className="site-count" aria-label={`${sites.length} sites`}>
+              {sites.length}
+            </span>
           </div>
-        )}
-        <Outlet />
-      </main>
+
+          <nav className="site-list">
+            {sites.map((site, index) => {
+              let hostname = site.main_url;
+              try {
+                hostname = new URL(site.main_url).hostname.replace(/^www\./, '');
+              } catch {
+                // Keep the stored URL when it is not parseable.
+              }
+
+              return (
+                <NavLink
+                  key={site.id}
+                  to={`/site/${site.id}`}
+                  className={({ isActive }) =>
+                    isActive ? 'site-link active' : 'site-link'
+                  }
+                >
+                  <span className="site-index">{String(index + 1).padStart(2, '0')}</span>
+                  <span className="site-link-copy">
+                    <strong>{site.name}</strong>
+                    <small>{hostname}</small>
+                  </span>
+                  <span
+                    className={`site-state ${site.active ? 'live' : 'paused'}`}
+                    title={site.active ? 'Monitoring active' : 'Monitoring paused'}
+                  />
+                </NavLink>
+              );
+            })}
+            {sites.length === 0 && (
+              <p className="site-list-empty">No sites available.</p>
+            )}
+          </nav>
+        </aside>
+
+        <main className="main">
+          {import.meta.env.VITE_BEACON_ENV !== 'production' && (
+            <div className="staging-banner" role="status">
+              Local dashboard view — production checks run on GitHub Actions (US). Refresh after a workflow finishes to see new data.
+            </div>
+          )}
+          <Outlet />
+        </main>
+      </div>
     </div>
   );
 }

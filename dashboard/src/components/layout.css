@@ -4,6 +4,13 @@
   flex-direction: column;
 }
 
+.workspace {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr);
+  align-items: stretch;
+}
+
 .topbar {
   display: flex;
   flex-wrap: wrap;
@@ -118,6 +125,164 @@
   white-space: nowrap;
 }
 
+.site-sidebar {
+  position: sticky;
+  top: 73px;
+  align-self: start;
+  height: calc(100vh - 73px);
+  padding: 1.35rem 0.85rem;
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+  background:
+    linear-gradient(180deg, color-mix(in oklab, var(--panel) 94%, #092b31) 0%, var(--panel) 100%);
+}
+
+.site-sidebar-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 0 0.65rem 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.site-sidebar-head > div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.site-sidebar-head strong {
+  font-family: var(--display);
+  font-size: 1.15rem;
+  letter-spacing: -0.02em;
+}
+
+.eyebrow {
+  color: var(--accent);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.site-count {
+  display: inline-grid;
+  width: 1.7rem;
+  height: 1.7rem;
+  place-items: center;
+  border: 1px solid color-mix(in oklab, var(--accent) 38%, var(--line));
+  border-radius: 50%;
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.site-list {
+  display: grid;
+  gap: 0.35rem;
+  padding-top: 0.75rem;
+}
+
+.site-link {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.65rem minmax(0, 1fr) 0.45rem;
+  gap: 0.55rem;
+  align-items: center;
+  min-height: 3.8rem;
+  padding: 0.6rem 0.65rem;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  color: var(--muted);
+  text-decoration: none;
+  transition:
+    color 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease,
+    transform 160ms ease;
+}
+
+.site-link::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: var(--accent);
+  content: '';
+  opacity: 0;
+  transform: scaleY(0.35);
+  transition: 160ms ease;
+}
+
+.site-link:hover {
+  color: var(--ink);
+  border-color: var(--line);
+  background: color-mix(in oklab, var(--panel-2) 82%, transparent);
+  transform: translateX(2px);
+}
+
+.site-link.active {
+  color: var(--ink);
+  border-color: color-mix(in oklab, var(--accent) 28%, var(--line));
+  background:
+    linear-gradient(100deg, color-mix(in oklab, var(--accent) 13%, var(--panel-2)), var(--panel-2));
+}
+
+.site-link.active::before {
+  opacity: 1;
+  transform: scaleY(1);
+}
+
+.site-index {
+  color: color-mix(in oklab, var(--muted) 72%, transparent);
+  font-family: var(--display);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+}
+
+.site-link-copy {
+  display: grid;
+  min-width: 0;
+  gap: 0.15rem;
+}
+
+.site-link-copy strong,
+.site-link-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.site-link-copy strong {
+  color: inherit;
+  font-size: 0.86rem;
+}
+
+.site-link-copy small {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.site-state {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 50%;
+}
+
+.site-state.live {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ok) 14%, transparent);
+}
+
+.site-state.paused {
+  background: var(--muted);
+}
+
+.site-list-empty {
+  margin: 0.75rem 0.65rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
 .main {
   flex: 1;
   padding: 1.25rem;
@@ -140,8 +305,48 @@
   .topbar {
     align-items: flex-start;
   }
+
   .topbar-right {
     width: 100%;
     justify-content: space-between;
+  }
+
+  .workspace {
+    display: block;
+  }
+
+  .site-sidebar {
+    position: static;
+    width: 100%;
+    height: auto;
+    padding: 0.7rem 1rem;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .site-sidebar-head {
+    display: none;
+  }
+
+  .site-list {
+    display: flex;
+    width: max-content;
+    padding: 0;
+  }
+
+  .site-link {
+    grid-template-columns: minmax(7rem, 1fr) 0.4rem;
+    min-height: auto;
+    padding: 0.55rem 0.7rem;
+  }
+
+  .site-index,
+  .site-link-copy small {
+    display: none;
+  }
+
+  .site-link-copy strong {
+    font-size: 0.78rem;
   }
 }
