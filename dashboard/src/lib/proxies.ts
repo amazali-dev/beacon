@@ -76,11 +76,11 @@ export async function loadProxyPoolStatus(): Promise<ProxyPoolStatus> {
 
 export async function saveProxyPool(
   enabled: boolean,
-  replacements?: ProxyCredential[]
+  additions?: ProxyCredential[]
 ): Promise<ProxyPoolStatus> {
   const { data, error } = await supabase.rpc('save_proxy_pool', {
     p_enabled: enabled,
-    p_pool: replacements ?? null,
+    p_pool: additions ?? null,
   });
   if (error) {
     if (error.code === 'PGRST202' || /save_proxy_pool/i.test(error.message)) {

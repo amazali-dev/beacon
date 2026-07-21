@@ -60,7 +60,7 @@ export function ProxySettings() {
       setInput('');
       setMessage(
         input.trim()
-          ? `${next.proxyCount} fallback ${next.proxyCount === 1 ? 'proxy' : 'proxies'} saved encrypted.`
+          ? `${next.proxyCount} fallback ${next.proxyCount === 1 ? 'proxy is' : 'proxies are'} now saved encrypted.`
           : `Fallback proxies ${next.enabled ? 'enabled' : 'disabled'}; saved credentials were not changed.`
       );
     } catch (err) {
@@ -136,10 +136,11 @@ export function ProxySettings() {
       </section>
 
       <section className="ops-panel">
-        <h2>{status?.proxyCount ? 'Replace proxy pool' : 'Add proxy pool'}</h2>
+        <h2>Add proxies</h2>
         <p className="section-hint">
-          Paste one cURL command or proxy URL per line. Saving a non-empty list replaces the
-          complete pool. Leave it empty to only enable or disable the saved pool.
+          Paste one cURL command or proxy URL per line. New proxies are added to the saved pool;
+          matching server and username entries update their credentials. Leave it empty to only
+          enable or disable the saved pool.
         </p>
         <textarea
           className="proxy-input"
