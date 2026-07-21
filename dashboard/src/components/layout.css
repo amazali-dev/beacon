@@ -109,6 +109,39 @@
   background: var(--panel-2);
 }
 
+.refresh-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid color-mix(in oklab, var(--accent) 55%, var(--line));
+  background: color-mix(in oklab, var(--accent) 12%, var(--panel));
+  color: var(--ink);
+  border-radius: 0.35rem;
+  padding: 0.45rem 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.refresh-button span {
+  color: var(--accent);
+  font-size: 1.05rem;
+  line-height: 1;
+  transition: transform 180ms ease;
+}
+
+.refresh-button:hover {
+  background: color-mix(in oklab, var(--accent) 20%, var(--panel));
+}
+
+.refresh-button:hover span {
+  transform: rotate(90deg);
+}
+
+.refresh-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .topbar-right {
   display: flex;
   align-items: center;

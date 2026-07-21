@@ -79,6 +79,16 @@ export function Layout() {
           ))}
         </nav>
         <div className="topbar-right">
+          <button
+            className="refresh-button"
+            type="button"
+            onClick={() => window.location.reload()}
+            title="Reload current production data"
+            aria-label="Refresh dashboard data"
+          >
+            <span aria-hidden="true">↻</span>
+            Refresh
+          </button>
           <span className="clock" title="Dashboard deployed commit">
             Build {buildSha}
           </span>
