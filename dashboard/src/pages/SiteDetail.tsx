@@ -126,6 +126,15 @@ export function SiteDetail() {
   const openIncidents = incidents.filter((i) => !i.closed_at);
   const closedIncidents = incidents.filter((i) => i.closed_at);
 
+  const latestChecksByProfile = useMemo(() => {
+    const latest = new Map<string, LoadCheck>();
+    // Checks arrive newest first. Preserve the first row for each profile.
+    for (const check of checks) {
+      if (!latest.has(check.profile)) latest.set(check.profile, check);
+    }
+    return [...latest.values()];
+  }, [checks]);
+
   const chartChecks = useMemo(() => {
     const since =
       chartRange === '24h' ? sinceDays(1) : sinceDays(7);
@@ -221,7 +230,7 @@ export function SiteDetail() {
               <p className="empty">No load checks yet.</p>
             ) : (
               <ul className="metric-list">
-                {[...new Map(checks.map((c) => [c.profile, c])).values()].map((c) => (
+                {latestChecksByProfile.map((c) => (
                   <li key={c.id} className="metric-with-shot">
                     <div>
                       <strong>{profileLabel(c.profile)}</strong>
