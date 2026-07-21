@@ -481,6 +481,39 @@ export function Reporting() {
         </div>
       ) : (
         <>
+          {!selectedSiteId && (
+            <section className="report-panel">
+              <div className="report-section-head">
+                <div>
+                  <span className="eyebrow">Portfolio</span>
+                  <h2>Website reports</h2>
+                </div>
+                <p>Select a website for its detailed report and evidence.</p>
+              </div>
+              <div className="report-site-grid">
+                {siteReports.map(({ site, metrics: siteMetrics }, index) => (
+                  <Link
+                    key={site.id}
+                    to={`/reports?days=${days}&site=${site.id}`}
+                    className="report-site-card"
+                  >
+                    <span className="report-site-number">
+                      {String(index + 1).padStart(2, '0')}
+                    </span>
+                    <div>
+                      <strong>{site.name}</strong>
+                      <small>{siteMetrics.totalVisits.toLocaleString()} visits</small>
+                    </div>
+                    <div className={`report-site-score tone-${healthTone(siteMetrics.healthPercent)}`}>
+                      {percent(siteMetrics.healthPercent)}
+                    </div>
+                    <span className="report-site-arrow">→</span>
+                  </Link>
+                ))}
+              </div>
+            </section>
+          )}
+
           <ReportMetricsGrid metrics={metrics} />
 
           <section className="report-panel">
@@ -517,39 +550,6 @@ export function Reporting() {
               <p className="empty">No production visits in this range.</p>
             )}
           </section>
-
-          {!selectedSiteId && (
-            <section className="report-panel">
-              <div className="report-section-head">
-                <div>
-                  <span className="eyebrow">Portfolio</span>
-                  <h2>Website reports</h2>
-                </div>
-                <p>Select a website for its detailed report and evidence.</p>
-              </div>
-              <div className="report-site-grid">
-                {siteReports.map(({ site, metrics: siteMetrics }, index) => (
-                  <Link
-                    key={site.id}
-                    to={`/reports?days=${days}&site=${site.id}`}
-                    className="report-site-card"
-                  >
-                    <span className="report-site-number">
-                      {String(index + 1).padStart(2, '0')}
-                    </span>
-                    <div>
-                      <strong>{site.name}</strong>
-                      <small>{siteMetrics.totalVisits.toLocaleString()} visits</small>
-                    </div>
-                    <div className={`report-site-score tone-${healthTone(siteMetrics.healthPercent)}`}>
-                      {percent(siteMetrics.healthPercent)}
-                    </div>
-                    <span className="report-site-arrow">→</span>
-                  </Link>
-                ))}
-              </div>
-            </section>
-          )}
 
           <section className="report-panel report-evidence-panel">
             <div className="report-section-head">
