@@ -41,7 +41,7 @@ function buildEvents(
 
   for (const c of loadChecks) {
     const slow = (c.load_ms ?? 0) > 8000;
-    const rateLimited = c.status_code === 429 || c.status_code === 503;
+    const rateLimited = c.status_code === 429;
     const bad =
       (!c.loaded || (c.status_code ?? 0) >= 400) && !rateLimited;
     const warn =

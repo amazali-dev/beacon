@@ -1,6 +1,4 @@
-/**
- * Navigate with slow retries on HTTP 429/503 (CDN rate limits).
- */
+/** Navigate with short retries on HTTP 429 blocks and transient HTTP 503 responses. */
 
 import type { Page, Response } from 'playwright';
 
@@ -54,12 +52,21 @@ export async function gotoWithRetries(
       console.log(
         `  HTTP ${statusCode} — waiting ${Math.round(backoff / 1000)}s then retry ${attempt}/${maxAttempts}`
       );
-      note = `Site returned HTTP ${statusCode} (too many requests). Retried ${attempt} time(s).`;
+      note =
+        statusCode === 429
+          ? `Site returned HTTP 429 (too many requests). Retried ${attempt} time(s).`
+          : `Site returned HTTP 503 (service unavailable). Retried ${attempt} time(s).`;
       if (attempt < maxAttempts) {
         await sleep(backoff);
         continue;
       }
-      return { statusCode, attempts: attempt, note, rateLimited: true };
+      return {
+        statusCode,
+        attempts: attempt,
+        note,
+        // Only 429 conclusively means rate limiting. 503 can be a real outage.
+        rateLimited: statusCode === 429,
+      };
     }
 
     if (statusCode !== null && statusCode >= 500 && attempt < maxAttempts) {
@@ -73,7 +80,7 @@ export async function gotoWithRetries(
     statusCode,
     attempts: maxAttempts,
     note,
-    rateLimited: statusCode === 429 || statusCode === 503,
+    rateLimited: statusCode === 429,
   };
 }
 

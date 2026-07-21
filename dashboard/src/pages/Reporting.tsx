@@ -2,6 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ScreenshotModal, ScreenshotThumb } from '../components/ScreenshotModal';
 import {
+  HEALTH_SCORING_CONFIG,
+  type ScoreComponent,
+} from '../lib/healthScoring';
+import {
   buildDailyHistory,
   calculateReportMetrics,
   hasContentIssue,
@@ -47,8 +51,8 @@ function duration(value: number | null): string {
 
 function healthTone(value: number | null): 'green' | 'yellow' | 'red' | 'gray' {
   if (value === null) return 'gray';
-  if (value >= 99) return 'green';
-  if (value >= 90) return 'yellow';
+  if (value >= HEALTH_SCORING_CONFIG.healthThresholds.healthyMin) return 'green';
+  if (value >= HEALTH_SCORING_CONFIG.healthThresholds.attentionMin) return 'yellow';
   return 'red';
 }
 
@@ -78,9 +82,9 @@ function ReportMetricsGrid({ metrics }: { metrics: ReportMetrics }) {
   return (
     <section className="report-metrics" aria-label="Report summary">
       <MetricCard
-        label="Visit health"
+        label="Overall health"
         value={percent(metrics.healthPercent)}
-        detail={`${metrics.successfulVisits.toLocaleString()} successful of ${(metrics.successfulVisits + metrics.failedVisits).toLocaleString()} assessed · rate limits excluded`}
+        detail="Weighted availability, content, performance and browser score"
         tone={healthTone(metrics.healthPercent)}
       />
       <MetricCard
@@ -103,10 +107,10 @@ function ReportMetricsGrid({ metrics }: { metrics: ReportMetrics }) {
         }
       />
       <MetricCard
-        label="Form success"
-        value={percent(metrics.formSuccessPercent)}
+        label="Form health"
+        value={percent(metrics.formHealthPercent)}
         detail={`${metrics.successfulForms} submitted of ${decidedForms} completed attempts · ${metrics.skippedForms} skipped`}
-        tone={healthTone(metrics.formSuccessPercent)}
+        tone={healthTone(metrics.formHealthPercent)}
       />
       <MetricCard
         label="Slow visits"
@@ -120,6 +124,174 @@ function ReportMetricsGrid({ metrics }: { metrics: ReportMetrics }) {
         detail="Visits where a required CTA or form was not found"
         tone={metrics.contentIssueVisits === 0 ? 'green' : 'yellow'}
       />
+      <MetricCard
+        label="Monitor confidence"
+        value={percent(metrics.monitorConfidencePercent)}
+        detail={`${metrics.websiteHealth.confidenceLabel} confidence · ${metrics.websiteHealth.observedProfiles}/${metrics.websiteHealth.expectedProfiles} browsers assessed`}
+        tone={
+          metrics.websiteHealth.confidenceLabel === 'High'
+            ? 'green'
+            : metrics.websiteHealth.confidenceLabel === 'Moderate'
+              ? 'yellow'
+              : metrics.websiteHealth.confidenceLabel === 'Low'
+                ? 'red'
+                : 'gray'
+        }
+      />
+    </section>
+  );
+}
+
+function ScoreRow({ component }: { component: ScoreComponent }) {
+  return (
+    <div className="score-row">
+      <div className="score-row-copy">
+        <strong>{component.label}</strong>
+        <small>{component.detail}</small>
+      </div>
+      <span className="score-weight">{component.weight}% weight</span>
+      <strong className={`score-value tone-${healthTone(component.score)}`}>
+        {percent(component.score)}
+      </strong>
+    </div>
+  );
+}
+
+function HealthBreakdown({ metrics }: { metrics: ReportMetrics }) {
+  const website = metrics.websiteHealth;
+  const forms = metrics.formHealth;
+
+  return (
+    <section className="report-panel health-breakdown">
+      <div className="report-section-head">
+        <div>
+          <span className="eyebrow">Transparent scoring</span>
+          <h2>Health score breakdown</h2>
+        </div>
+        <p>No hidden parameters. Unknown data is shown as “—”, never assumed healthy.</p>
+      </div>
+
+      <div className="score-columns">
+        <div className="score-column">
+          <header>
+            <div>
+              <strong>Website health</strong>
+              <small>Composite score: {percent(website.score)}</small>
+            </div>
+            <span className={`confidence-pill confidence-${website.confidenceLabel.toLowerCase().replace(' ', '-')}`}>
+              {website.confidenceLabel} confidence
+            </span>
+          </header>
+          <ScoreRow component={website.availability} />
+          <ScoreRow component={website.contentIntegrity} />
+          <ScoreRow component={website.performance} />
+          <ScoreRow component={website.browserCompatibility} />
+          <p className="score-footnote">
+            {website.excludedRateLimits} HTTP 429 visit
+            {website.excludedRateLimits === 1 ? '' : 's'} excluded from health. HTTP 503 remains
+            a failure because it can indicate real service unavailability.
+          </p>
+        </div>
+
+        <div className="score-column">
+          <header>
+            <div>
+              <strong>Form health</strong>
+              <small>Composite score: {percent(forms.score)}</small>
+            </div>
+            <span className="confidence-pill">
+              {forms.assessedForms} assessed · {forms.skippedForms} skipped
+            </span>
+          </header>
+          <ScoreRow component={forms.contactFields} />
+          <ScoreRow component={forms.logoUpload} />
+          <ScoreRow component={forms.submissionConfirmation} />
+          <ScoreRow component={forms.leadEmail} />
+          <p className="score-footnote">
+            Lead email is scored only when inbox verification produced a result. Rate-limited
+            form runs are skipped, not failed.
+          </p>
+        </div>
+      </div>
+
+      <details className="health-methodology">
+        <summary>
+          <span aria-hidden>ⓘ</span> How health is calculated
+        </summary>
+        <div className="methodology-body">
+          <section>
+            <h3>Website formula</h3>
+            <p>
+              Overall health is the weighted average of Availability{' '}
+              <strong>{HEALTH_SCORING_CONFIG.websiteWeights.availability}%</strong>, Critical
+              content <strong>{HEALTH_SCORING_CONFIG.websiteWeights.contentIntegrity}%</strong>,
+              Performance <strong>{HEALTH_SCORING_CONFIG.websiteWeights.performance}%</strong>,
+              and Browser compatibility{' '}
+              <strong>{HEALTH_SCORING_CONFIG.websiteWeights.browserCompatibility}%</strong>.
+              If a component has no measurable data, it is marked unknown and the available
+              weights are normalized rather than inventing a pass or failure.
+            </p>
+          </section>
+          <section>
+            <h3>Parameter definitions</h3>
+            <ul>
+              <li>
+                <strong>Availability:</strong> HTTP 2xx/3xx and loaded successfully, divided by
+                assessed visits. Timeouts, network failures, 4xx and 5xx count as failures.
+              </li>
+              <li>
+                <strong>Critical content:</strong> logo, headline, quote CTA and expected quote
+                form assertions on successful visits.
+              </li>
+              <li>
+                <strong>Performance:</strong> ≤
+                {HEALTH_SCORING_CONFIG.performance.fastMaxMs / 1000}s scores{' '}
+                {HEALTH_SCORING_CONFIG.performance.fastScore}; ≤
+                {HEALTH_SCORING_CONFIG.performance.acceptableMaxMs / 1000}s scores{' '}
+                {HEALTH_SCORING_CONFIG.performance.acceptableScore}; slower scores{' '}
+                {HEALTH_SCORING_CONFIG.performance.slowScore}. Average and P95 are also shown
+                separately.
+              </li>
+              <li>
+                <strong>Browser compatibility:</strong> availability balanced across Desktop,
+                Safari and Mobile profiles that produced assessable results.
+              </li>
+            </ul>
+          </section>
+          <section>
+            <h3>Rate limits and confidence</h3>
+            <p>
+              A definite HTTP 429 is excluded because it shows the GitHub monitor IP was blocked,
+              not confirmed website downtime. HTTP 503 is not automatically excluded. Confidence
+              combines assessable-visit coverage (70%) and browser-profile coverage (30%). A high
+              score with low confidence must not be interpreted as conclusive health.
+            </p>
+          </section>
+          <section>
+            <h3>Form formula</h3>
+            <p>
+              Form health combines contact fields{' '}
+              <strong>{HEALTH_SCORING_CONFIG.formWeights.contactFields}%</strong>, logo upload{' '}
+              <strong>{HEALTH_SCORING_CONFIG.formWeights.logoUpload}%</strong>, submission
+              confirmation{' '}
+              <strong>{HEALTH_SCORING_CONFIG.formWeights.submissionConfirmation}%</strong>, and
+              lead email <strong>{HEALTH_SCORING_CONFIG.formWeights.leadEmail}%</strong>. Optional
+              email verification is omitted when disabled, and remaining measured weights are
+              normalized.
+            </p>
+          </section>
+          <section>
+            <h3>Labels and scope</h3>
+            <p>
+              Healthy is ≥{HEALTH_SCORING_CONFIG.healthThresholds.healthyMin}%; Needs attention is
+              ≥{HEALTH_SCORING_CONFIG.healthThresholds.attentionMin}%; lower is Unhealthy. Reports
+              use production rows only and rolling 24-hour/3/7/15/30-day windows in PKT. These
+              centrally defined weights and thresholds can be changed later without rewriting the
+              report.
+            </p>
+          </section>
+        </div>
+      </details>
     </section>
   );
 }
@@ -288,9 +460,9 @@ export function Reporting() {
       )}
 
       <p className="report-formula">
-        <strong>Visit health</strong> = successful HTTP 2xx/3xx visits ÷ assessed visits.
-        A first successful run shows 100%. HTTP 429/503 rate limits are shown separately and
-        excluded because they reflect the GitHub monitor IP, not confirmed website downtime.
+        <strong>Overall health</strong> is a weighted score for availability, critical content,
+        performance and browser compatibility. HTTP 429 monitor blocks are excluded; HTTP 503
+        remains a failure. Open “How health is calculated” below for every parameter.
       </p>
 
       {error && <p className="error">{error}</p>}
@@ -302,12 +474,13 @@ export function Reporting() {
       ) : (
         <>
           <ReportMetricsGrid metrics={metrics} />
+          <HealthBreakdown metrics={metrics} />
 
           <section className="report-panel">
             <div className="report-section-head">
               <div>
                 <span className="eyebrow">Trend</span>
-                <h2>Daily health history</h2>
+                <h2>Daily overall health history</h2>
               </div>
               <p>Each column summarizes all browser visits recorded that day.</p>
             </div>

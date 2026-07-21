@@ -1,4 +1,13 @@
 import { supabase } from './supabase';
+import {
+  calculateFormHealth,
+  calculateWebsiteHealth,
+  isAvailableVisit,
+  isMonitorRateLimit,
+  isRateLimitedFormTest,
+  type FormHealthScore,
+  type WebsiteHealthScore,
+} from './healthScoring';
 import type { FormTest, LoadCheck, Site } from './types';
 
 export type ReportRangeDays = 1 | 3 | 7 | 15 | 30;
@@ -16,6 +25,8 @@ export type ReportMetrics = {
   rateLimitedVisits: number;
   contentIssueVisits: number;
   healthPercent: number | null;
+  websiteHealth: WebsiteHealthScore;
+  monitorConfidencePercent: number | null;
   averageLoadMs: number | null;
   p95LoadMs: number | null;
   fastestLoadMs: number | null;
@@ -25,6 +36,8 @@ export type ReportMetrics = {
   failedForms: number;
   skippedForms: number;
   formSuccessPercent: number | null;
+  formHealthPercent: number | null;
+  formHealth: FormHealthScore;
 };
 
 export type DailyReportPoint = {
@@ -116,16 +129,11 @@ export async function loadReportData(
 }
 
 export function isSuccessfulVisit(check: LoadCheck): boolean {
-  return (
-    check.loaded === true &&
-    check.status_code !== null &&
-    check.status_code >= 200 &&
-    check.status_code < 400
-  );
+  return isAvailableVisit(check);
 }
 
 export function isRateLimitedVisit(check: LoadCheck): boolean {
-  return check.status_code === 429 || check.status_code === 503;
+  return isMonitorRateLimit(check);
 }
 
 export function hasContentIssue(check: LoadCheck): boolean {
@@ -133,7 +141,7 @@ export function hasContentIssue(check: LoadCheck): boolean {
 }
 
 export function isRateLimitedForm(test: FormTest): boolean {
-  return /SKIPPED.*rate.?limit|CDN rate-limited|HTTP 429/i.test(test.notes || '');
+  return isRateLimitedFormTest(test);
 }
 
 function roundedAverage(values: number[]): number | null {
@@ -151,6 +159,8 @@ export function calculateReportMetrics(
   checks: LoadCheck[],
   forms: FormTest[]
 ): ReportMetrics {
+  const websiteHealth = calculateWebsiteHealth(checks);
+  const formHealth = calculateFormHealth(forms);
   const successfulVisits = checks.filter(isSuccessfulVisit).length;
   const rateLimitedVisits = checks.filter(isRateLimitedVisit).length;
   const assessedVisits = checks.length - rateLimitedVisits;
@@ -173,9 +183,9 @@ export function calculateReportMetrics(
     failedVisits,
     rateLimitedVisits,
     contentIssueVisits: checks.filter(hasContentIssue).length,
-    healthPercent: assessedVisits
-      ? Math.round((successfulVisits / assessedVisits) * 10_000) / 100
-      : null,
+    healthPercent: websiteHealth.score,
+    websiteHealth,
+    monitorConfidencePercent: websiteHealth.confidencePercent,
     averageLoadMs: roundedAverage(loadTimes),
     p95LoadMs: percentile95(loadTimes),
     fastestLoadMs: loadTimes.length ? Math.min(...loadTimes) : null,
@@ -187,6 +197,8 @@ export function calculateReportMetrics(
     formSuccessPercent: decidedForms
       ? Math.round((successfulForms / decidedForms) * 10_000) / 100
       : null,
+    formHealthPercent: formHealth.score,
+    formHealth,
   };
 }
 
@@ -208,6 +220,7 @@ export function buildDailyHistory(checks: LoadCheck[]): DailyReportPoint[] {
       const successful = rows.filter(isSuccessfulVisit);
       const rateLimited = rows.filter(isRateLimitedVisit).length;
       const assessed = rows.length - rateLimited;
+      const websiteHealth = calculateWebsiteHealth(rows);
       const times = successful
         .map((row) => row.load_ms)
         .filter((value): value is number => value !== null);
@@ -223,9 +236,7 @@ export function buildDailyHistory(checks: LoadCheck[]): DailyReportPoint[] {
         assessed,
         successful: successful.length,
         rateLimited,
-        healthPercent: assessed
-          ? Math.round((successful.length / assessed) * 10_000) / 100
-          : null,
+        healthPercent: websiteHealth.score,
         averageLoadMs: roundedAverage(times),
       };
     });

@@ -30,7 +30,7 @@ const TABS = [
 ];
 
 function loadCheckResultLabel(c: LoadCheck): string {
-  if (c.status_code === 429 || c.status_code === 503) {
+  if (c.status_code === 429) {
     return `Rate limited (HTTP ${c.status_code})`;
   }
   if (!c.loaded || (c.status_code ?? 0) >= 400) {
@@ -41,7 +41,7 @@ function loadCheckResultLabel(c: LoadCheck): string {
 }
 
 function loadCheckBadge(c: LoadCheck): 'ok' | 'bad' | 'muted' {
-  if (c.status_code === 429 || c.status_code === 503) return 'muted';
+  if (c.status_code === 429) return 'muted';
   if (!c.loaded || (c.status_code ?? 0) >= 400) return 'bad';
   if ((c.load_ms ?? 0) > 8000 || c.elements_ok?.cta === false || c.elements_ok?.quote_form === false) {
     return 'muted';
@@ -146,7 +146,7 @@ export function SiteDetail() {
       if (visitProfile !== 'all' && c.profile !== visitProfile) return false;
       const badge = loadCheckBadge(c);
       if (visitFilter === 'ok' && badge !== 'ok') return false;
-      if (visitFilter === 'fail' && badge !== 'bad' && c.status_code !== 429 && c.status_code !== 503) {
+      if (visitFilter === 'fail' && badge !== 'bad' && c.status_code !== 429) {
         return false;
       }
       if (visitFilter === 'fail' && badge === 'ok') return false;

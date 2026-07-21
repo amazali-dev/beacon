@@ -34,12 +34,12 @@ export function healthFromChecks(checks: LoadCheck[], slowThresholdMs = 8000): H
   const hardFail = latest.some(
     (c) =>
       (!c.loaded || (c.status_code ?? 0) >= 400) &&
-      c.status_code !== 429 &&
-      c.status_code !== 503
+      c.status_code !== 429
   );
   if (hardFail) return 'red';
-  // 429/503 = temporary rate limit from site/CDN — not a true outage
-  if (latest.some((c) => c.status_code === 429 || c.status_code === 503)) return 'yellow';
+  // A definite 429 is a monitor/CDN block, not confirmed website downtime.
+  // A 503 remains a hard failure because it can be real service unavailability.
+  if (latest.some((c) => c.status_code === 429)) return 'yellow';
   if (
     latest.some(
       (c) =>
@@ -62,7 +62,7 @@ export function healthReasons(checks: LoadCheck[], slowThresholdMs = 8000): stri
   const reasons: string[] = [];
   for (const c of latestByProfile.values()) {
     if (!c.loaded || (c.status_code ?? 0) >= 400) {
-      if (c.status_code === 429 || c.status_code === 503) {
+      if (c.status_code === 429) {
         reasons.push(
           `${profileLabel(c.profile)}: site rate-limited the checker (HTTP ${c.status_code})`
         );

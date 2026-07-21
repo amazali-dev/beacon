@@ -334,8 +334,9 @@ export async function runLoadCheckForSiteProfile(
     check_ip: geo.ip,
   });
 
-  // Rate limits are temporary CDN blocks — record the check, don't spam incidents/alerts
-  if (result.statusCode === 429 || result.statusCode === 503) {
+  // A definite 429 is a monitor/CDN block — record it, but do not call the site down.
+  // A 503 follows the hard-failure path below because it can be real unavailability.
+  if (result.statusCode === 429) {
     await closeIncident(site.id, 'load_failure');
     // Keep a single open rate_limited note (openIncident dedupes by open type if supported;
     // if not, we still avoid email spam via cooldown when we skip maybeSendAlert here)
@@ -459,7 +460,7 @@ export async function runAllLoadChecks(opts: {
   const betweenProfiles = cfg.delayMsBetweenProfiles ?? 20000;
   const afterRateLimit = cfg.delayMsAfterRateLimit ?? 8000;
   const abortAfter = cfg.abortAfterConsecutiveRateLimits ?? 3;
-  let consecutiveRateLimits = 0;
+  let consecutiveBlockedOrUnavailable = 0;
 
   // Profile outer loop: hit each site less often (desktop all sites → pause → Safari → …)
   for (let pi = 0; pi < profiles.length; pi++) {
@@ -501,19 +502,19 @@ export async function runAllLoadChecks(opts: {
       }
 
       if (statusCode === 429 || statusCode === 503) {
-        consecutiveRateLimits += 1;
+        consecutiveBlockedOrUnavailable += 1;
         console.log(
-          `  rate-limit streak ${consecutiveRateLimits}/${abortAfter}`
+          `  blocked/unavailable streak ${consecutiveBlockedOrUnavailable}/${abortAfter}`
         );
-        if (consecutiveRateLimits >= abortAfter) {
+        if (consecutiveBlockedOrUnavailable >= abortAfter) {
           console.warn(
-            `\n!!! ABORTING LOAD CHECKS — CDN rate-limited ${abortAfter} checks in a row. ` +
+            `\n!!! ABORTING LOAD CHECKS — ${abortAfter} consecutive HTTP 429/503 responses. ` +
               `Stopping so this job does not run for 30+ minutes. Try again later or set PROXY_URL.\n`
           );
           return;
         }
       } else if (statusCode !== null && statusCode >= 200 && statusCode < 400) {
-        consecutiveRateLimits = 0;
+        consecutiveBlockedOrUnavailable = 0;
       }
 
       const pause =
