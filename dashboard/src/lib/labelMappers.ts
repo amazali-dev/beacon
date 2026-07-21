@@ -113,6 +113,8 @@ export function incidentTypeLabel(type: string): string {
   switch (type) {
     case 'form_test_failure':
       return 'Form test failed';
+    case 'form_logo_upload_recovered':
+      return 'Logo upload recovered after refresh';
     case 'load_check_failure':
     case 'load_failure':
       return 'Load check failed';

@@ -129,6 +129,13 @@ function IncidentCard({
 }) {
   const open = !incident.closed_at;
   const title = incidentTypeLabel(incident.type);
+  const evidencePaths = Array.from(
+    new Set(
+      [...(incident.screenshot_paths || []), incident.screenshot_path].filter(
+        (path): path is string => Boolean(path)
+      )
+    )
+  );
 
   return (
     <article className={`incident ${open ? 'open' : 'closed'}`}>
@@ -146,11 +153,18 @@ function IncidentCard({
           <> · Closed {formatRelativeTime(incident.closed_at)}</>
         )}
       </p>
-      <ScreenshotThumb
-        src={incident.screenshot_path}
-        alt={title}
-        onOpen={(src) => onOpenShot(src, title)}
-      />
+      <div className="incident-evidence">
+        {evidencePaths.map((path, index) => (
+          <div key={path}>
+            <span>{evidencePaths.length > 1 ? `Attempt ${index + 1}` : 'Evidence'}</span>
+            <ScreenshotThumb
+              src={path}
+              alt={`${title} — attempt ${index + 1}`}
+              onOpen={(src) => onOpenShot(src, `${title} — attempt ${index + 1}`)}
+            />
+          </div>
+        ))}
+      </div>
     </article>
   );
 }

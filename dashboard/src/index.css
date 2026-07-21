@@ -332,6 +332,26 @@ th {
   border: 1px solid var(--line);
 }
 
+.incident-evidence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.65rem;
+}
+
+.incident-evidence > div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.incident-evidence > div > span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
 .settings-form {
   margin: 1rem 0;
   padding: 1rem;
@@ -1603,14 +1623,19 @@ th {
 
 .report-site-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(255px, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0.65rem;
 }
 
 .report-site-card {
   display: grid;
-  grid-template-columns: 2rem minmax(0, 1fr) auto auto;
-  gap: 0.7rem;
+  min-width: 0;
+  grid-template-columns: 1.55rem minmax(0, 1fr) auto;
+  grid-template-areas:
+    "number identity arrow"
+    "number score arrow";
+  column-gap: 0.6rem;
+  row-gap: 0.2rem;
   align-items: center;
   padding: 0.9rem;
   border: 1px solid var(--line);
@@ -1628,6 +1653,17 @@ th {
 
 .report-site-card > div:nth-child(2) {
   display: grid;
+  min-width: 0;
+  grid-area: identity;
+}
+
+.report-site-card strong,
+.report-site-card small {
+  overflow-wrap: anywhere;
+}
+
+.report-site-number {
+  grid-area: number;
 }
 
 .report-site-card small,
@@ -1637,8 +1673,11 @@ th {
 }
 
 .report-site-score {
+  grid-area: score;
+  min-width: 0;
   font-family: var(--display);
-  font-size: 0.9rem;
+  font-size: 0.78rem;
+  white-space: nowrap;
 }
 
 .report-site-score.tone-green {
@@ -1656,6 +1695,10 @@ th {
 .report-site-score.tone-gray,
 .report-site-arrow {
   color: var(--muted);
+}
+
+.report-site-arrow {
+  grid-area: arrow;
 }
 
 .report-evidence-panel {
@@ -1878,6 +1921,10 @@ th {
     grid-template-columns: 1fr 1fr;
   }
 
+  .report-site-grid {
+    grid-template-columns: 1fr;
+  }
+
   .score-columns,
   .methodology-body {
     grid-template-columns: 1fr;
@@ -1899,6 +1946,12 @@ th {
   .evidence-row .shot-thumb {
     grid-column: 2;
     justify-self: start;
+  }
+}
+
+@media (min-width: 641px) and (max-width: 800px) {
+  .report-site-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

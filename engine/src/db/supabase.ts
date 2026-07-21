@@ -94,6 +94,7 @@ export async function insertFormTest(row: {
   submit_to_inbox_seconds: number | null;
   logo_upload_ok: boolean | null;
   screenshot_path: string | null;
+  attempt_screenshot_paths?: string[];
   notes: string | null;
   is_production: boolean;
   check_country?: string | null;
@@ -169,11 +170,23 @@ export async function openIncident(row: {
   type: string;
   detail: string;
   screenshot_path?: string | null;
+  screenshot_paths?: string[];
   is_production?: boolean;
 }): Promise<string> {
   const isProduction = row.is_production ?? getDeploymentMode() === 'production';
   const existing = await findOpenIncident(row.site_id, row.type, isProduction);
-  if (existing) return existing.id;
+  if (existing) {
+    const { error } = await getSupabase()
+      .from('incidents')
+      .update({
+        detail: row.detail,
+        screenshot_path: row.screenshot_path || null,
+        screenshot_paths: row.screenshot_paths || [],
+      })
+      .eq('id', existing.id);
+    if (error) throw new Error(error.message);
+    return existing.id;
+  }
   const { data, error } = await getSupabase()
     .from('incidents')
     .insert({
@@ -181,6 +194,7 @@ export async function openIncident(row: {
       type: row.type,
       detail: row.detail,
       screenshot_path: row.screenshot_path || null,
+      screenshot_paths: row.screenshot_paths || [],
       alerted: false,
       is_production: isProduction,
     })
@@ -190,6 +204,33 @@ export async function openIncident(row: {
     const raced = await findOpenIncident(row.site_id, row.type, isProduction);
     if (raced) return raced.id;
   }
+  if (error) throw new Error(error.message);
+  return data.id;
+}
+
+export async function recordResolvedIncident(row: {
+  site_id: string;
+  type: string;
+  detail: string;
+  screenshot_path?: string | null;
+  screenshot_paths?: string[];
+  is_production?: boolean;
+}): Promise<string> {
+  const now = new Date().toISOString();
+  const { data, error } = await getSupabase()
+    .from('incidents')
+    .insert({
+      site_id: row.site_id,
+      type: row.type,
+      detail: row.detail,
+      screenshot_path: row.screenshot_path || null,
+      screenshot_paths: row.screenshot_paths || [],
+      alerted: false,
+      is_production: row.is_production ?? getDeploymentMode() === 'production',
+      closed_at: now,
+    })
+    .select('id')
+    .single();
   if (error) throw new Error(error.message);
   return data.id;
 }

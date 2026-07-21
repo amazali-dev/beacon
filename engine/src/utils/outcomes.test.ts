@@ -61,6 +61,7 @@ test('confirmed form submission wins while retaining unverified egress metadata'
 
 test('verifies formatted phone fields by their digits', () => {
   assert.equal(phoneDigitsMatch('(555) 010-0100', '5550100100'), true);
+  assert.equal(phoneDigitsMatch('(555) 555-1234', '+1 555 555 1234'), true);
   assert.equal(phoneDigitsMatch('', '5550100100'), false);
   assert.equal(phoneDigitsMatch('5550109999', '5550100100'), false);
 });

@@ -225,9 +225,12 @@ export async function fillPhoneField(
   );
 
   for (const attempt of attempts) {
-    if (await attempt().catch(() => false)) {
-      if (await verifyPhoneFilled(page, phone)) return true;
-    }
+    // Phone widgets commonly reformat raw digits (for example,
+    // 5555551234 -> (555) 555-1234). The generic fill helper may report
+    // false even though the controlled field visibly contains the number,
+    // so always perform the digit-aware verification after each attempt.
+    await attempt().catch(() => false);
+    if (await verifyPhoneFilled(page, phone)) return true;
   }
   return false;
 }

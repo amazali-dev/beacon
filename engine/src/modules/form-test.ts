@@ -8,14 +8,14 @@
  * do not open false "form broken" incidents.
  */
 
-import { join } from 'node:path';
 import { chromium, type Locator, type Page } from 'playwright';
-import { engineRootPath, getEnv, getTestIdentity, isInboxVerificationEnabled, loadConfig } from '../config.js';
+import { getEnv, getTestIdentity, isInboxVerificationEnabled, loadConfig } from '../config.js';
 import {
   fetchActiveSites,
   insertFormTest,
   openIncident,
   closeIncident,
+  recordResolvedIncident,
 } from '../db/supabase.js';
 import { maybeSendAlert } from '../alerts/email.js';
 import { verifyInboxForRunId } from './imap-verify.js';
@@ -29,6 +29,10 @@ import {
   verifyProxyEgress,
 } from '../utils/proxy-pool.js';
 import { classifyFormOutcome } from '../utils/outcomes.js';
+import {
+  selectLogoCandidates,
+  type LogoAsset,
+} from '../utils/logo-pool.js';
 import { captureFormScreenshot } from '../utils/screenshots.js';
 import { gotoWithRetries, pageLooksRateLimited, sleep } from '../utils/navigate.js';
 import {
@@ -88,32 +92,21 @@ async function waitForLogoUploadState(
   return 'failed';
 }
 
-async function uploadLogoWithRetry(
+async function uploadLogoOnce(
   page: Page,
   fileInput: Locator,
-  logoPath: string,
+  logo: LogoAsset,
+  attempt: number,
   notes: string[]
 ): Promise<boolean> {
-  await fileInput.setInputFiles(logoPath);
-
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    const state = await waitForLogoUploadState(page);
-    if (state === 'success' || state === 'quiet') {
-      notes.push(attempt === 1 ? 'Logo upload accepted' : 'Logo upload accepted after retry');
-      return true;
-    }
-    if (attempt === 2) break;
-
-    notes.push('Logo upload reported a network failure; retrying once');
-    const retry = page.getByRole('button', { name: /retry/i }).first();
-    if (await retry.isVisible({ timeout: 1500 }).catch(() => false)) {
-      await retry.click({ timeout: 5000 });
-    } else {
-      await fileInput.setInputFiles(logoPath);
-    }
+  await fileInput.setInputFiles(logo.path);
+  notes.push(`Attempt ${attempt}: uploading logo ${logo.label}`);
+  const state = await waitForLogoUploadState(page);
+  if (state === 'success' || state === 'quiet') {
+    notes.push(`Attempt ${attempt}: logo upload accepted`);
+    return true;
   }
-
-  notes.push('Logo upload failed after one retry');
+  notes.push(`Attempt ${attempt}: logo upload reported a network failure`);
   return false;
 }
 
@@ -126,14 +119,14 @@ export async function runFormTestForSite(
   const identity = getTestIdentity(config);
   const runId = buildRunId();
   const message = identity.messageTemplate.replace('{runId}', runId);
-  const logoPath = join(engineRootPath(), 'assets/test-logo.png');
-
   let layer1: boolean | null = null;
   let layer2: boolean | null = null;
   let layer3: boolean | null = null;
   let submitToInboxSeconds: number | null = null;
   let logoUploadOk: boolean | null = null;
+  let logoRecoveredAfterRefresh = false;
   let screenshotPath: string | null = null;
+  const attemptScreenshotPaths: string[] = [];
   let rateLimited = false;
   let monitorError = false;
   let directStatus: number | null = null;
@@ -155,6 +148,7 @@ export async function runFormTestForSite(
   const siteReady = await ensureFormSelectors(site);
   const selectors = siteReady.form_selectors || {};
   const formUrl = withMonitorParam(siteReady.quote_form_url || siteReady.main_url);
+  const logoCandidates = await selectLogoCandidates(site.id);
 
   let browser = await chromium.launch(
     getBrowserLaunchOptions({
@@ -265,34 +259,71 @@ export async function runFormTestForSite(
           throw new Error('Required contact fields were not filled successfully');
         }
 
-        if (selectors.file) {
-          try {
-            logoUploadOk = await uploadLogoWithRetry(
-              page,
-              page.locator(selectors.file).first(),
-              logoPath,
-              notes
-            );
-          } catch {
-            logoUploadOk = false;
-            notes.push('Logo upload failed');
-          }
+        let fileInput = selectors.file
+          ? page.locator(selectors.file).first()
+          : page.locator('input[type="file"]').first();
+        if ((await fileInput.count()) === 0) {
+          logoUploadOk = false;
+          notes.push('No file upload field detected');
         } else {
-          const fileInput = page.locator('input[type="file"]').first();
-          if (await fileInput.isVisible({ timeout: 2000 }).catch(() => false)) {
-            try {
-              logoUploadOk = await uploadLogoWithRetry(page, fileInput, logoPath, notes);
-            } catch {
-              logoUploadOk = false;
-              notes.push('Logo upload failed');
-            }
-          } else {
-            logoUploadOk = false;
-            notes.push('No file upload field detected');
-          }
+          logoUploadOk = await uploadLogoOnce(page, fileInput, logoCandidates[0]!, 1, notes)
+            .catch(() => false);
         }
+
         if (logoUploadOk === false) {
-          throw new Error('Required logo upload failed after one retry');
+          const firstShot = await captureFormScreenshot(
+            page,
+            `form_${site.name}_${runId}_logo_attempt_1`,
+            'failure'
+          );
+          if (firstShot) attemptScreenshotPaths.push(firstShot);
+
+          const refreshDelayMs = 15_000;
+          notes.push(
+            `Attempt 1 screenshot captured. Waiting ${refreshDelayMs / 1000} seconds, then refreshing the same browser session and IP.`
+          );
+          await page.waitForTimeout(refreshDelayMs);
+          await page.reload({ waitUntil: 'domcontentloaded', timeout: 45_000 });
+          const refreshedEgress = await verifyProxyEgress(page.context());
+          if (checkIp && refreshedEgress.ip && refreshedEgress.ip !== checkIp) {
+            monitorError = true;
+            throw new Error(
+              `Egress IP changed before logo retry (${checkIp} -> ${refreshedEgress.ip}); same-IP retry was not performed`
+            );
+          }
+          notes.push(
+            refreshedEgress.ip
+              ? `Attempt 2: page refreshed and same egress IP verified (${refreshedEgress.ip}).`
+              : `Attempt 2: page refreshed in the same browser session; egress re-verification was unavailable (${checkIp || 'original IP unknown'}).`
+          );
+          await page.waitForTimeout(2500);
+          await openQuoteFormIfNeeded(page);
+          await fillContactFields(page, identity, selectors, notes);
+          if (/name field fill failed|email field fill failed|phone field fill failed/i.test(notes.join(' '))) {
+            throw new Error('Required contact fields were not filled after the logo-upload refresh');
+          }
+
+          fileInput = selectors.file
+            ? page.locator(selectors.file).first()
+            : page.locator('input[type="file"]').first();
+          const retryLogo = logoCandidates[1] || logoCandidates[0]!;
+          logoUploadOk =
+            (await fileInput.count()) > 0
+              ? await uploadLogoOnce(page, fileInput, retryLogo, 2, notes).catch(() => false)
+              : false;
+          const secondShot = await captureFormScreenshot(
+            page,
+            `form_${site.name}_${runId}_logo_attempt_2`,
+            logoUploadOk ? 'success' : 'failure'
+          );
+          if (secondShot) attemptScreenshotPaths.push(secondShot);
+
+          if (!logoUploadOk) {
+            notes.push('Attempt 2 remained unsuccessful after refreshing the page.');
+            throw new Error('Required logo upload failed on both attempts, including after refresh');
+          }
+          logoRecoveredAfterRefresh = true;
+          notes.push('Attempt 2 succeeded after refreshing the page; continuing form submission.');
         }
 
         notes.push(...(await completeSignageQuoteSteps(page, message)));
@@ -404,6 +435,7 @@ export async function runFormTestForSite(
     submit_to_inbox_seconds: submitToInboxSeconds,
     logo_upload_ok: logoUploadOk,
     screenshot_path: screenshotPath,
+    attempt_screenshot_paths: attemptScreenshotPaths,
     notes: notes.join(' | ') || null,
     is_production: geo.isProduction,
     check_country: checkCountry,
@@ -420,12 +452,27 @@ export async function runFormTestForSite(
   const submissionOnly = !isInboxVerificationEnabled();
   const anyFail =
     !monitorError && !rateLimited && (layer1 === false || (!submissionOnly && layer2 === false));
+
+  if (logoRecoveredAfterRefresh) {
+    await recordResolvedIncident({
+      site_id: site.id,
+      type: 'form_logo_upload_recovered',
+      detail:
+        `${site.name} logo upload failed on attempt 1. The monitor captured evidence, ` +
+        `waited 15 seconds, refreshed the same browser session using IP ${checkIp || 'unknown'}, ` +
+        `and attempt 2 succeeded with a different logo. Final form confirmation: ${layer1 === true ? 'passed' : 'not confirmed'}.`,
+      screenshot_path: attemptScreenshotPaths[1] || screenshotPath,
+      screenshot_paths: attemptScreenshotPaths,
+    });
+  }
+
   if (anyFail) {
     const id = await openIncident({
       site_id: site.id,
       type: 'form_test_failure',
       detail: `${site.name} form test failed. L1=${layer1} L2=${layer2}. ${notes.join(' ')}`,
       screenshot_path: screenshotPath,
+      screenshot_paths: attemptScreenshotPaths,
     });
     await maybeSendAlert({
       incidentId: id,
@@ -445,6 +492,7 @@ export async function runFormTestForSite(
       type: 'form_check_failed_to_run',
       detail: `${site.name} form monitor could not complete. ${notes.join(' ')}`,
       screenshot_path: screenshotPath,
+      screenshot_paths: attemptScreenshotPaths,
     });
   }
 

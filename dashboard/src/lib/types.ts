@@ -50,6 +50,7 @@ export type FormTest = {
   submit_to_inbox_seconds: number | null;
   logo_upload_ok: boolean | null;
   screenshot_path: string | null;
+  attempt_screenshot_paths?: string[];
   notes: string | null;
   is_production?: boolean;
   check_country?: string | null;
@@ -72,6 +73,7 @@ export type Incident = {
   detail: string | null;
   alerted: boolean;
   screenshot_path: string | null;
+  screenshot_paths?: string[];
   is_production?: boolean;
 };
 
