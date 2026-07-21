@@ -97,9 +97,8 @@ export async function loadReportData(
   siteId?: string
 ): Promise<ReportData> {
   const startIso = reportStartIso(days);
-  const sitesQuery = siteId
-    ? supabase.from('sites').select('*').eq('id', siteId)
-    : supabase.from('sites').select('*').order('name');
+  // Always keep the full site list available for the report site selector.
+  const sitesQuery = supabase.from('sites').select('*').order('name');
 
   const [{ data: siteRows, error: siteError }, checks, forms] = await Promise.all([
     sitesQuery,

@@ -1060,6 +1060,37 @@ th {
   background: transparent;
 }
 
+.report-back-inline {
+  width: max-content;
+}
+
+.report-site-selector {
+  display: flex;
+  min-width: min(19rem, 100%);
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.35rem 0.4rem 0.35rem 0.75rem;
+  border: 1px solid color-mix(in oklab, var(--accent) 32%, var(--line));
+  border-radius: 0.55rem;
+  background: color-mix(in oklab, var(--panel) 90%, transparent);
+}
+
+.report-site-selector > span {
+  color: var(--accent);
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.report-site-selector select {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: var(--bg0);
+  font-weight: 500;
+}
+
 .report-formula {
   margin: 0;
   padding: 0.7rem 0.9rem;

@@ -225,6 +225,13 @@ export function Reporting() {
     setParams(next);
   }
 
+  function selectSite(siteId: string) {
+    const next = new URLSearchParams(params);
+    if (siteId) next.set('site', siteId);
+    else next.delete('site');
+    setParams(next);
+  }
+
   return (
     <div className="report-page">
       <header className="report-hero">
@@ -257,12 +264,28 @@ export function Reporting() {
             </button>
           ))}
         </div>
-        {selectedSiteId && (
-          <button type="button" className="report-back" onClick={showCollective}>
-            ← Collective report
-          </button>
-        )}
+        <label className="report-site-selector">
+          <span>Website</span>
+          <select
+            value={selectedSiteId}
+            onChange={(event) => selectSite(event.target.value)}
+            aria-label="Select website report"
+          >
+            <option value="">All websites — collective</option>
+            {data.sites.map((site) => (
+              <option key={site.id} value={site.id}>
+                {site.name}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
+
+      {selectedSiteId && (
+        <button type="button" className="report-back report-back-inline" onClick={showCollective}>
+          ← Back to collective report
+        </button>
+      )}
 
       <p className="report-formula">
         <strong>Visit health</strong> = successful HTTP 2xx/3xx visits ÷ all recorded visits.
