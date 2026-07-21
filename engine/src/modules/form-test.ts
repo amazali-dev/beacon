@@ -28,7 +28,7 @@ import {
   type SelectedProxy,
   verifyProxyEgress,
 } from '../utils/proxy-pool.js';
-import { classifyCheckOutcome } from '../utils/outcomes.js';
+import { classifyFormOutcome } from '../utils/outcomes.js';
 import { captureFormScreenshot } from '../utils/screenshots.js';
 import { gotoWithRetries, pageLooksRateLimited, sleep } from '../utils/navigate.js';
 import {
@@ -319,9 +319,9 @@ export async function runFormTestForSite(
     layer2 = null;
     logoUploadOk = null;
   }
-  const outcome = classifyCheckOutcome({
+  const outcome = classifyFormOutcome({
     statusCode: fallbackStatus ?? directStatus,
-    completedSuccessfully: layer1 === true,
+    submissionConfirmed: layer1 === true,
     rateLimitEvidence: rateLimited,
     monitorError: monitorError || layer1 === null,
     egressVerified,

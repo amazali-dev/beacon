@@ -24,3 +24,23 @@ export function classifyCheckOutcome(input: {
   }
   return 'site_failure';
 }
+
+export function classifyFormOutcome(input: {
+  statusCode: number | null;
+  submissionConfirmed: boolean;
+  rateLimitEvidence?: boolean;
+  monitorError?: boolean;
+  egressVerified: boolean;
+}): CheckOutcome {
+  // A captured thank-you/confirmation screen is definitive evidence that the
+  // form task succeeded. Keep unverified egress as metadata/warning, but do
+  // not overwrite the confirmed site result.
+  if (input.submissionConfirmed) return 'success';
+  return classifyCheckOutcome({
+    statusCode: input.statusCode,
+    completedSuccessfully: false,
+    rateLimitEvidence: input.rateLimitEvidence,
+    monitorError: input.monitorError,
+    egressVerified: input.egressVerified,
+  });
+}

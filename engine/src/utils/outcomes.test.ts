@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { QUOTE_SUBMIT_TEXT } from '../modules/form-fill-helpers.js';
-import { classifyCheckOutcome } from './outcomes.js';
+import { classifyCheckOutcome, classifyFormOutcome } from './outcomes.js';
 
 test('429 is rate limited but 503 remains a site failure', () => {
   assert.equal(
@@ -45,4 +45,16 @@ test('recognizes common quote-form submit labels case-insensitively', () => {
   ]) {
     assert.match(label, QUOTE_SUBMIT_TEXT);
   }
+});
+
+test('confirmed form submission wins while retaining unverified egress metadata', () => {
+  assert.equal(
+    classifyFormOutcome({
+      statusCode: 200,
+      submissionConfirmed: true,
+      monitorError: true,
+      egressVerified: false,
+    }),
+    'success'
+  );
 });
