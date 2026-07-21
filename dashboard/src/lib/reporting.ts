@@ -48,6 +48,10 @@ export type DailyReportPoint = {
   successful: number;
   rateLimited: number;
   healthPercent: number | null;
+  availabilityPercent: number | null;
+  contentPercent: number | null;
+  performancePercent: number | null;
+  browserPercent: number | null;
   averageLoadMs: number | null;
 };
 
@@ -237,6 +241,10 @@ export function buildDailyHistory(checks: LoadCheck[]): DailyReportPoint[] {
         successful: successful.length,
         rateLimited,
         healthPercent: websiteHealth.score,
+        availabilityPercent: websiteHealth.availability.score,
+        contentPercent: websiteHealth.contentIntegrity.score,
+        performancePercent: websiteHealth.performance.score,
+        browserPercent: websiteHealth.browserCompatibility.score,
         averageLoadMs: roundedAverage(times),
       };
     });

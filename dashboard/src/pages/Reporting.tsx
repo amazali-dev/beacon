@@ -522,27 +522,60 @@ export function Reporting() {
                 <span className="eyebrow">Trend</span>
                 <h2>Daily overall health history</h2>
               </div>
-              <p>Each column summarizes all browser visits recorded that day.</p>
+              <p>Composite health and its four scoring components, day by day.</p>
             </div>
             {history.length ? (
               <div className="health-history">
                 {history.map((point) => (
                   <article key={point.key} className="health-day">
-                    <div className="health-day-value">
-                      <strong>{percent(point.healthPercent)}</strong>
-                      <span>{point.successful}/{point.assessed} assessed</span>
+                    <div className="health-day-date">
+                      <span>{point.label}</span>
+                      <small>{point.total} recorded visits</small>
                     </div>
-                    <div className="health-bar-track">
-                      <span
-                        className={`health-bar-fill tone-${healthTone(point.healthPercent)}`}
-                        style={{ height: `${Math.max(4, point.healthPercent || 0)}%` }}
-                      />
+                    <div className="health-day-overall">
+                      <span>Overall health</span>
+                      <strong className={`tone-${healthTone(point.healthPercent)}`}>
+                        {percent(point.healthPercent)}
+                      </strong>
+                      <div className="health-score-track">
+                        <span
+                          className={`tone-${healthTone(point.healthPercent)}`}
+                          style={{ width: `${Math.max(0, point.healthPercent || 0)}%` }}
+                        />
+                      </div>
                     </div>
-                    <span className="health-day-label">{point.label}</span>
-                    <small>{duration(point.averageLoadMs)} avg</small>
-                    {point.rateLimited > 0 && (
-                      <small className="rate-note">{point.rateLimited} limited</small>
-                    )}
+                    <div className="health-day-components">
+                      <span>
+                        <small>Availability</small>
+                        <strong>{percent(point.availabilityPercent)}</strong>
+                      </span>
+                      <span>
+                        <small>Content</small>
+                        <strong>{percent(point.contentPercent)}</strong>
+                      </span>
+                      <span>
+                        <small>Performance</small>
+                        <strong>{percent(point.performancePercent)}</strong>
+                      </span>
+                      <span>
+                        <small>Browsers</small>
+                        <strong>{percent(point.browserPercent)}</strong>
+                      </span>
+                    </div>
+                    <div className="health-day-volume">
+                      <span>
+                        <strong>{point.successful}/{point.assessed}</strong>
+                        <small>available</small>
+                      </span>
+                      <span>
+                        <strong>{duration(point.averageLoadMs)}</strong>
+                        <small>average load</small>
+                      </span>
+                      <span className={point.rateLimited ? 'rate-note' : ''}>
+                        <strong>{point.rateLimited}</strong>
+                        <small>HTTP 429 excluded</small>
+                      </span>
+                    </div>
                   </article>
                 ))}
               </div>

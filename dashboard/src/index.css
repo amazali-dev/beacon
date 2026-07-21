@@ -1448,81 +1448,119 @@ th {
 }
 
 .health-history {
-  display: flex;
-  min-height: 15rem;
-  gap: clamp(0.35rem, 1.5vw, 0.8rem);
-  align-items: flex-end;
-  overflow-x: auto;
-  padding: 0.5rem 0 0.25rem;
+  display: grid;
+  gap: 0.55rem;
 }
 
 .health-day {
   display: grid;
-  min-width: 3.4rem;
-  flex: 1;
-  gap: 0.3rem;
-  text-align: center;
-}
-
-.health-day-value {
-  display: grid;
-}
-
-.health-day-value strong {
-  font-family: var(--display);
-  font-size: 0.78rem;
-}
-
-.health-day-value span,
-.health-day small {
-  color: var(--muted);
-  font-size: 0.62rem;
-}
-
-.health-bar-track {
-  position: relative;
-  width: min(2.2rem, 75%);
-  height: 8rem;
-  margin: 0 auto;
-  overflow: hidden;
+  grid-template-columns: 6rem minmax(9rem, 0.8fr) minmax(20rem, 1.7fr) minmax(15rem, 1fr);
+  gap: 1rem;
+  align-items: center;
+  padding: 0.85rem;
   border: 1px solid var(--line);
-  border-radius: 0.28rem 0.28rem 0.12rem 0.12rem;
-  background:
-    repeating-linear-gradient(
-      to top,
-      transparent 0,
-      transparent 24%,
-      color-mix(in oklab, var(--line) 60%, transparent) 25%
-    ),
-    var(--bg0);
+  border-radius: 0.55rem;
+  background: var(--panel);
 }
 
-.health-bar-fill {
+.health-day-date {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.health-day-date > span {
+  font-family: var(--display);
+  font-size: 0.82rem;
+}
+
+.health-day-date small,
+.health-day-overall > span,
+.health-day-components small,
+.health-day-volume small {
+  color: var(--muted);
+  font-size: 0.64rem;
+}
+
+.health-day-overall {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.health-day-overall > strong {
+  font-family: var(--display);
+  font-size: 1.25rem;
+}
+
+.health-day-overall > strong.tone-green {
+  color: var(--ok);
+}
+
+.health-day-overall > strong.tone-yellow {
+  color: var(--warn);
+}
+
+.health-day-overall > strong.tone-red {
+  color: var(--bad);
+}
+
+.health-day-overall > strong.tone-gray {
+  color: var(--muted);
+}
+
+.health-score-track {
+  position: relative;
+  height: 0.32rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--bg0);
+}
+
+.health-score-track > span {
   position: absolute;
-  inset: auto 0 0;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
   background: var(--muted);
-  transition: height 300ms ease;
+  transition: width 300ms ease;
 }
 
-.health-bar-fill.tone-green {
-  background: linear-gradient(to top, #21794b, var(--ok));
+.health-score-track > span.tone-green {
+  background: var(--ok);
 }
 
-.health-bar-fill.tone-yellow {
-  background: linear-gradient(to top, #7d582b, var(--warn));
+.health-score-track > span.tone-yellow {
+  background: var(--warn);
 }
 
-.health-bar-fill.tone-red {
-  background: linear-gradient(to top, #7a2f2f, var(--bad));
+.health-score-track > span.tone-red {
+  background: var(--bad);
 }
 
-.health-day-label {
-  color: var(--ink);
-  font-size: 0.67rem;
-  white-space: nowrap;
+.health-day-components,
+.health-day-volume {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.45rem;
 }
 
-.health-day .rate-note {
+.health-day-volume {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.health-day-components > span,
+.health-day-volume > span {
+  display: grid;
+  gap: 0.1rem;
+  padding-left: 0.5rem;
+  border-left: 1px solid var(--line);
+}
+
+.health-day-components strong,
+.health-day-volume strong {
+  font-size: 0.75rem;
+}
+
+.health-day-volume .rate-note strong,
+.health-day-volume .rate-note small {
   color: var(--warn);
 }
 
@@ -1727,6 +1765,15 @@ th {
   .score-columns,
   .methodology-body {
     grid-template-columns: 1fr;
+  }
+
+  .health-day {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .health-day-components,
+  .health-day-volume {
+    grid-column: 1 / -1;
   }
 
   .evidence-row {
