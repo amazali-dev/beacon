@@ -31,6 +31,7 @@ export type DailyReportPoint = {
   key: string;
   label: string;
   total: number;
+  assessed: number;
   successful: number;
   rateLimited: number;
   healthPercent: number | null;
@@ -152,6 +153,8 @@ export function calculateReportMetrics(
 ): ReportMetrics {
   const successfulVisits = checks.filter(isSuccessfulVisit).length;
   const rateLimitedVisits = checks.filter(isRateLimitedVisit).length;
+  const assessedVisits = checks.length - rateLimitedVisits;
+  const failedVisits = assessedVisits - successfulVisits;
   const loadTimes = checks
     .filter(isSuccessfulVisit)
     .map((check) => check.load_ms)
@@ -167,11 +170,11 @@ export function calculateReportMetrics(
   return {
     totalVisits: checks.length,
     successfulVisits,
-    failedVisits: checks.length - successfulVisits,
+    failedVisits,
     rateLimitedVisits,
     contentIssueVisits: checks.filter(hasContentIssue).length,
-    healthPercent: checks.length
-      ? Math.round((successfulVisits / checks.length) * 10_000) / 100
+    healthPercent: assessedVisits
+      ? Math.round((successfulVisits / assessedVisits) * 10_000) / 100
       : null,
     averageLoadMs: roundedAverage(loadTimes),
     p95LoadMs: percentile95(loadTimes),
@@ -203,6 +206,8 @@ export function buildDailyHistory(checks: LoadCheck[]): DailyReportPoint[] {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([key, rows]) => {
       const successful = rows.filter(isSuccessfulVisit);
+      const rateLimited = rows.filter(isRateLimitedVisit).length;
+      const assessed = rows.length - rateLimited;
       const times = successful
         .map((row) => row.load_ms)
         .filter((value): value is number => value !== null);
@@ -215,10 +220,11 @@ export function buildDailyHistory(checks: LoadCheck[]): DailyReportPoint[] {
           timeZone: 'Asia/Karachi',
         }),
         total: rows.length,
+        assessed,
         successful: successful.length,
-        rateLimited: rows.filter(isRateLimitedVisit).length,
-        healthPercent: rows.length
-          ? Math.round((successful.length / rows.length) * 10_000) / 100
+        rateLimited,
+        healthPercent: assessed
+          ? Math.round((successful.length / assessed) * 10_000) / 100
           : null,
         averageLoadMs: roundedAverage(times),
       };

@@ -80,7 +80,7 @@ function ReportMetricsGrid({ metrics }: { metrics: ReportMetrics }) {
       <MetricCard
         label="Visit health"
         value={percent(metrics.healthPercent)}
-        detail={`${metrics.successfulVisits.toLocaleString()} successful of ${metrics.totalVisits.toLocaleString()} total visits`}
+        detail={`${metrics.successfulVisits.toLocaleString()} successful of ${(metrics.successfulVisits + metrics.failedVisits).toLocaleString()} assessed · rate limits excluded`}
         tone={healthTone(metrics.healthPercent)}
       />
       <MetricCard
@@ -288,9 +288,9 @@ export function Reporting() {
       )}
 
       <p className="report-formula">
-        <strong>Visit health</strong> = successful HTTP 2xx/3xx visits ÷ all recorded visits.
-        A first successful run shows 100%. Rate-limited visits remain visible and count as
-        unsuccessful monitor visits.
+        <strong>Visit health</strong> = successful HTTP 2xx/3xx visits ÷ assessed visits.
+        A first successful run shows 100%. HTTP 429/503 rate limits are shown separately and
+        excluded because they reflect the GitHub monitor IP, not confirmed website downtime.
       </p>
 
       {error && <p className="error">{error}</p>}
@@ -317,7 +317,7 @@ export function Reporting() {
                   <article key={point.key} className="health-day">
                     <div className="health-day-value">
                       <strong>{percent(point.healthPercent)}</strong>
-                      <span>{point.successful}/{point.total}</span>
+                      <span>{point.successful}/{point.assessed} assessed</span>
                     </div>
                     <div className="health-bar-track">
                       <span
