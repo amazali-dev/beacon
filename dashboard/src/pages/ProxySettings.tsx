@@ -138,8 +138,8 @@ export function ProxySettings() {
       <section className="ops-panel">
         <h2>{status?.proxyCount ? 'Replace proxy pool' : 'Add proxy pool'}</h2>
         <p className="section-hint">
-          Paste one cURL command or proxy URL per line, up to 10. Saving a non-empty list replaces
-          the complete pool. Leave it empty to only enable or disable the saved pool.
+          Paste one cURL command or proxy URL per line. Saving a non-empty list replaces the
+          complete pool. Leave it empty to only enable or disable the saved pool.
         </p>
         <textarea
           className="proxy-input"

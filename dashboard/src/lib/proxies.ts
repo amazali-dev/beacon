@@ -26,10 +26,6 @@ export function parseProxyLines(raw: string): ProxyCredential[] {
     .map((line) => line.trim())
     .filter(Boolean);
 
-  if (lines.length > 10) {
-    throw new Error('Paste at most 10 proxies.');
-  }
-
   return lines.map((line, index) => {
     const proxyUrl = extractProxyUrl(line);
     let parsed: URL;

@@ -43,7 +43,7 @@ async function fetchPool(): Promise<StoredProxy[]> {
     } else {
       const result = data as { enabled?: boolean; pool?: unknown } | null;
       if (result?.enabled && Array.isArray(result.pool)) {
-        const pool = result.pool.filter(validStoredProxy).slice(0, 10);
+        const pool = result.pool.filter(validStoredProxy);
         if (pool.length > 0) return pool;
       }
     }
