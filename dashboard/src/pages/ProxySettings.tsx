@@ -184,7 +184,8 @@ export function ProxySettings() {
       <section className="ops-panel">
         <h2>Add proxies</h2>
         <p className="section-hint">
-          Paste one cURL command or proxy URL per line. New proxies are added to the saved pool;
+          Paste one cURL command, proxy URL, or Geonix-style line per row
+          (<code>host:port:username:password</code>). New proxies are added to the saved pool;
           matching server and username entries update their credentials. Leave it empty to only
           enable or disable the saved pool.
         </p>
@@ -195,7 +196,7 @@ export function ProxySettings() {
           onChange={(event) => setInput(event.target.value)}
           autoComplete="off"
           spellCheck={false}
-          placeholder={`${SAMPLE}\nhttp://username:password@another-proxy-host:80/`}
+          placeholder={`${SAMPLE}\nhttp://username:password@proxy-host:10000/\nproxy-host:10000:username:password`}
         />
 
         {input.trim() && (

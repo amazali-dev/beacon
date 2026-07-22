@@ -28,6 +28,30 @@ function extractProxyUrl(line: string): string {
   return (curlMatch?.[1] || curlMatch?.[2] || curlMatch?.[3] || trimmed).trim();
 }
 
+/** Geonix / provider export: host:port:username:password */
+function parseHostPortCredentialLine(line: string): ProxyCredential | null {
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(line)) return null;
+
+  const parts = line.split(':');
+  if (parts.length < 4) return null;
+
+  const port = parts[parts.length - 3];
+  if (!/^\d{2,5}$/.test(port)) return null;
+
+  const password = parts[parts.length - 1];
+  const username = parts[parts.length - 2];
+  const host = parts.slice(0, parts.length - 3).join(':');
+  if (!host || !username || !password) return null;
+
+  return {
+    id: crypto.randomUUID(),
+    label: '',
+    server: `http://${host}:${port}`,
+    username,
+    password,
+  };
+}
+
 export function parseProxyLines(raw: string): ProxyCredential[] {
   const lines = raw
     .split(/\r?\n/)
@@ -36,13 +60,21 @@ export function parseProxyLines(raw: string): ProxyCredential[] {
 
   return lines.map((line, index) => {
     const proxyUrl = extractProxyUrl(line);
+    const colonForm = parseHostPortCredentialLine(proxyUrl);
+    if (colonForm) {
+      return { ...colonForm, label: `Fallback ${index + 1}` };
+    }
+
     let parsed: URL;
     try {
       parsed = new URL(
         /^[a-z][a-z0-9+.-]*:\/\//i.test(proxyUrl) ? proxyUrl : `http://${proxyUrl}`
       );
     } catch {
-      throw new Error(`Proxy ${index + 1} is not a valid URL or cURL --proxy value.`);
+      throw new Error(
+        `Proxy ${index + 1} is not a valid URL or cURL --proxy value. ` +
+          `Try http://user:pass@host:port or host:port:user:pass.`
+      );
     }
 
     if (!['http:', 'https:'].includes(parsed.protocol) || !parsed.hostname) {
