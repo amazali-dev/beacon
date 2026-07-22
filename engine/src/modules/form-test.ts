@@ -204,7 +204,9 @@ export async function runFormTestForSite(
         if (!egressVerified) {
           monitorError = true;
           notes.push('Proxy egress was not verified in the required country.');
-          await markProxyBlocked(proxy, 'Unknown or non-US proxy egress');
+          await markProxyBlocked(proxy, 'Unknown or non-US proxy egress', {
+            persistCooldownMinutes: 60,
+          });
         }
         console.log(
           `  fallback ${proxy.label}: ${egress.country || 'unknown country'} / ${egress.ip || 'unknown IP'}`
@@ -214,7 +216,8 @@ export async function runFormTestForSite(
         fallbackStatus = nav.statusCode;
         notes.push(`Attempt 2 ${proxy.label}: HTTP ${nav.statusCode ?? 'no response'}.`);
         navigationBlocked = nav.rateLimited || (await pageLooksRateLimited(page));
-        if (navigationBlocked) await markProxyBlocked(proxy);
+        // Target 429/soft-block: skip for this run only. Do not empty the pool.
+        if (navigationBlocked) await markProxyBlocked(proxy, 'HTTP 429 from target');
       } else {
         notes.push('No enabled fallback proxy was available.');
       }
@@ -377,7 +380,9 @@ export async function runFormTestForSite(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (selectedProxy && /net::|proxy|tunnel|connection|timeout|browser.*closed/i.test(msg)) {
-      await markProxyBlocked(selectedProxy, `Fallback execution failed: ${msg}`);
+      await markProxyBlocked(selectedProxy, `Fallback execution failed: ${msg}`, {
+        persistCooldownMinutes: 60,
+      });
     }
     if (/429|rate.?limit|too many requests/i.test(msg) || (await pageLooksRateLimited(page))) {
       rateLimited = true;

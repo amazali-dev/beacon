@@ -127,16 +127,32 @@ export async function selectFallbackProxy(brandId: string): Promise<SelectedProx
   return selected;
 }
 
+/**
+ * Skip a proxy for the rest of this workflow run.
+ * Only persist a multi-hour cooldown for broken proxy infrastructure
+ * (bad egress / tunnel failures). Target-site HTTP 429 must NOT burn the
+ * whole pool for 2 hours — that created a death spiral where every later
+ * check had "No enabled fallback proxy was available".
+ */
 export async function markProxyBlocked(
   proxy: SelectedProxy,
-  reason = 'HTTP 429 from target'
+  reason = 'HTTP 429 from target',
+  opts?: { persistCooldownMinutes?: number }
 ): Promise<void> {
   blockedThisRun.add(proxy.id);
-  console.warn(`${proxy.label} returned HTTP 429; cooling it down for the rest of this run.`);
+  const persistMinutes = opts?.persistCooldownMinutes;
+  if (persistMinutes == null) {
+    console.warn(`${proxy.label}: ${reason} — skipping for the rest of this run only.`);
+    return;
+  }
+
+  console.warn(
+    `${proxy.label}: ${reason} — cooling down for ${persistMinutes} minutes.`
+  );
   const { error } = await getSupabase().rpc('record_proxy_failure', {
     p_proxy_id: proxy.id,
     p_reason: reason,
-    p_cooldown_minutes: 120,
+    p_cooldown_minutes: persistMinutes,
   });
   if (error) console.warn(`Could not persist proxy cooldown: ${error.message}`);
 }

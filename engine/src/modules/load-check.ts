@@ -357,7 +357,8 @@ export async function runLoadCheckForSiteProfile(
         proxyUsed = true;
         const fallback = await runLoadAttempt(site, profile, url, proxy);
         fallbackStatus = fallback.statusCode;
-        if (fallback.statusCode === 429) await markProxyBlocked(proxy);
+        // Target 429: skip this proxy for the rest of the run only.
+        if (fallback.statusCode === 429) await markProxyBlocked(proxy, 'HTTP 429 from target');
         fallback.notes =
           `Attempt 1 direct: HTTP 429. Attempt 2 ${proxy.label}: ` +
           `${fallback.statusCode ?? 'no response'}. ${fallback.notes || ''}`;
@@ -373,12 +374,15 @@ export async function runLoadCheckForSiteProfile(
           fallback.notes =
             `${fallback.notes || ''} ` +
             'Proxy egress was not verified in the required country; excluded from site health.';
-          await markProxyBlocked(proxy, 'Unknown or non-US proxy egress');
+          await markProxyBlocked(proxy, 'Unknown or non-US proxy egress', {
+            persistCooldownMinutes: 60,
+          });
         }
       } catch (err) {
         await markProxyBlocked(
           proxy,
-          `Fallback execution failed: ${err instanceof Error ? err.message : String(err)}`
+          `Fallback execution failed: ${err instanceof Error ? err.message : String(err)}`,
+          { persistCooldownMinutes: 60 }
         );
         attempt.notes =
           `${directNote} Fallback ${proxy.label} could not run: ` +
