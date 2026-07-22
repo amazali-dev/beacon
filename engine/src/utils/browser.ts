@@ -9,11 +9,25 @@
  *   socks5://host:port (auth often fails on Chromium — prefer http://)
  */
 
-import type { LaunchOptions } from 'playwright';
+import type { BrowserContext, LaunchOptions, Page } from 'playwright';
 import { getEnv } from '../config.js';
 
 export type BrowserProxy = NonNullable<LaunchOptions['proxy']>;
 
+/**
+ * tsx/esbuild "keep names" rewrites nested helpers as `__name(fn, "name")`.
+ * Playwright then serializes that source into the browser, where `__name` does
+ * not exist → ReferenceError. Install a no-op shim on every document (string
+ * form so tsx cannot transform it again).
+ */
+export const ESBUILD_NAME_SHIM =
+  'globalThis.__name=function(fn){return fn};';
+
+export async function applyEsbuildNameShim(
+  target: BrowserContext | Page
+): Promise<void> {
+  await target.addInitScript(ESBUILD_NAME_SHIM);
+}
 export function parseProxy(
   raw: string,
   userFromEnv: string,

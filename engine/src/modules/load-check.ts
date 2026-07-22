@@ -13,7 +13,7 @@ import {
   openIncident,
 } from '../db/supabase.js';
 import type { DeviceProfile, GeoGuardResult, LoadCheckResult, SiteRow } from '../types.js';
-import { getBrowserLaunchOptions } from '../utils/browser.js';
+import { applyEsbuildNameShim, getBrowserLaunchOptions } from '../utils/browser.js';
 import { withMonitorParam } from '../utils/monitor-param.js';
 import {
   markProxyBlocked,
@@ -244,6 +244,7 @@ async function runLoadAttempt(
   const { browser, contextOptions } = await launchForProfile(profile, proxy);
   try {
     const context = await browser.newContext(contextOptions);
+    await applyEsbuildNameShim(context);
     if (proxy) {
       const egress = await verifyProxyEgress(context);
       country = egress.country;

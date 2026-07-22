@@ -26,7 +26,7 @@ import {
 import { maybeSendAlert } from '../alerts/email.js';
 import { verifyInboxForRunId } from './imap-verify.js';
 import { verifyLeadInCrm } from '../hooks/crm-layer3.js';
-import { getBrowserLaunchOptions } from '../utils/browser.js';
+import { applyEsbuildNameShim, getBrowserLaunchOptions } from '../utils/browser.js';
 import { withMonitorParam } from '../utils/monitor-param.js';
 import {
   markProxyBlocked,
@@ -180,6 +180,7 @@ export async function runFormTestForSite(
         timezoneId: 'America/New_York',
       })
     : null;
+  if (context) await applyEsbuildNameShim(context);
   if (selectedProxy && context) {
     proxyUsed = true;
     notes.push(`Attempt 1 uses ${selectedProxy.label} (sticky for this brand).`);
@@ -208,6 +209,7 @@ export async function runFormTestForSite(
         locale: 'en-US',
         timezoneId: 'America/New_York',
       });
+  if (!context) await applyEsbuildNameShim(page);
   let submittedAt = Date.now();
 
   try {
@@ -251,6 +253,7 @@ export async function runFormTestForSite(
           locale: 'en-US',
           timezoneId: 'America/New_York',
         });
+        await applyEsbuildNameShim(proxyContext);
         const egress = await verifyProxyEgress(proxyContext);
         checkCountry = egress.country;
         checkIp = egress.ip;
