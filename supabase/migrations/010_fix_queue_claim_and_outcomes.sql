@@ -1,7 +1,10 @@
 -- Make queue claims return stable JSON for PostgREST, and keep service-role
 -- checks compatible with how the engine authenticates.
+-- Postgres cannot ALTER a function's return type in place.
 
-create or replace function public.claim_next_check_job(
+drop function if exists public.claim_next_check_job(text, integer);
+
+create function public.claim_next_check_job(
   p_runner_id text,
   p_lease_minutes integer default 65
 )
