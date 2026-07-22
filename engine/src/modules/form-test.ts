@@ -407,6 +407,8 @@ export async function runFormTestForSite(
                 `Fallback used: filled "Website URL or business name" with ${fallbackUrl} ` +
                   'so the form can still submit without a logo file. Continuing to submit.'
               );
+              // Re-apply contact fields in case a bad selector ever overwrote email/name.
+              await fillContactFields(page, identity, selectors, notes);
             } else {
               notes.push(
                 'Fallback failed: "Website URL or business name" field was not found or could not be filled.'

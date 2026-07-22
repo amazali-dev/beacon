@@ -359,37 +359,88 @@ export async function fillWebsiteOrBusinessFallback(
   page: Page,
   websiteOrName: string
 ): Promise<boolean> {
+  // Strict selectors only — never walk up into the contact block and overwrite email.
   const selectors = [
     'input[placeholder*="yourbusiness.com" i]',
     'input[placeholder*="business name" i]',
-    'input[placeholder*="website" i]',
-    'input[aria-label*="website" i]',
-    'input[aria-label*="business" i]',
-    'input[name*="website" i]',
-    'input[name*="business" i]',
-    'input[id*="website" i]',
+    'input[placeholder*="website url" i]',
+    'input[placeholder*="website" i]:not([type="email"]):not([name*="email" i])',
+    'input[aria-label*="website url" i]',
+    'input[aria-label*="website" i]:not([type="email"])',
+    'input[aria-label*="business name" i]',
+    'input[name*="website" i]:not([name*="email" i])',
+    'input[id*="website" i]:not([id*="email" i])',
     'input[type="url"]',
   ];
 
   for (const sel of selectors) {
     const loc = page.locator(sel).first();
     if (await loc.isVisible({ timeout: 800 }).catch(() => false)) {
+      const type = await loc.getAttribute('type').catch(() => '');
+      const name = await loc.getAttribute('name').catch(() => '');
+      const placeholder = await loc.getAttribute('placeholder').catch(() => '');
+      const blob = `${type || ''} ${name || ''} ${placeholder || ''}`.toLowerCase();
+      if (/email|phone|tel|mobile/.test(blob)) continue;
       if (await tryFillLocator(loc, websiteOrName)) return true;
     }
   }
 
-  if (
-    await fillInputNearLabel(
-      page,
-      /website\s*url|business\s*name|website\s*or\s*business/i,
-      websiteOrName,
-      { maxLabelLength: 40 }
-    )
-  ) {
-    return true;
-  }
+  // Find the website label, then fill only the nearest following non-contact input.
+  return page.evaluate((val) => {
+    const labelRe = /website\s*url|business\s*name|website\s*or\s*business|^website$/i;
+    const nodes = Array.from(
+      document.querySelectorAll('label, span, p, div, legend, strong, h3, h4')
+    );
+    const isContactField = (input: HTMLInputElement) => {
+      const type = (input.type || '').toLowerCase();
+      if (type === 'email' || type === 'tel' || type === 'password') return true;
+      const blob = [
+        input.name,
+        input.id,
+        input.placeholder,
+        input.getAttribute('aria-label'),
+        input.autocomplete,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return (
+        /email|e-mail|phone|tel|mobile/.test(blob) ||
+        (/name/.test(blob) && !/website|business|url|company|brand/.test(blob))
+      );
+    };
 
-  return fillInputNearLabel(page, /website/i, websiteOrName, { maxLabelLength: 24 });
+    for (const el of nodes) {
+      if (/^H[12]$/i.test(el.tagName)) continue;
+      const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!labelRe.test(text) || text.length > 40) continue;
+
+      const wrapper =
+        el.closest('label, .form-group, .field, [class*="field" i], div') || el.parentElement;
+      if (!wrapper) continue;
+
+      const inputs = Array.from(
+        wrapper.querySelectorAll(
+          'input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]):not([type="radio"])'
+        )
+      ) as HTMLInputElement[];
+
+      for (const input of inputs) {
+        const rect = input.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) continue;
+        if (isContactField(input)) continue;
+
+        input.focus();
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+        setter?.call(input, val);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        input.dispatchEvent(new Event('blur', { bubbles: true }));
+        return input.value === val || input.value.includes(val.slice(0, 12));
+      }
+    }
+    return false;
+  }, websiteOrName);
 }
 
 export async function fillContactFields(
