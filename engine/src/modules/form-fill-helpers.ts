@@ -91,24 +91,31 @@ async function tryFillLocator(loc: Locator, value: string): Promise<boolean> {
 export async function fillInputNearLabel(
   page: Page,
   labelRe: RegExp,
-  value: string
+  value: string,
+  opts?: { maxLabelLength?: number; preferTextarea?: boolean }
 ): Promise<boolean> {
+  const maxLabelLength = opts?.maxLabelLength ?? 40;
+  const preferTextarea = opts?.preferTextarea ?? false;
   return page.evaluate(
-    ({ pattern, val }) => {
+    ({ pattern, val, maxLen, textareaOnly }) => {
       const re = new RegExp(pattern, 'i');
       const candidates = Array.from(
         document.querySelectorAll('label, span, p, div, h3, h4, legend, strong')
       );
 
       for (const el of candidates) {
+        // Skip marketing headings — they often contain words like "Details".
+        if (/^H[12]$/i.test(el.tagName)) continue;
         const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
-        if (!re.test(text) || text.length > 50) continue;
+        if (!re.test(text) || text.length > maxLen) continue;
 
         let root: Element | null =
           el.closest('div, fieldset, li, form, section') || el.parentElement;
         for (let depth = 0; depth < 5 && root; depth++) {
           const inputs = root.querySelectorAll(
-            'input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea'
+            textareaOnly
+              ? 'textarea'
+              : 'input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]), textarea'
           );
           for (const inp of inputs) {
             const input = inp as HTMLInputElement | HTMLTextAreaElement;
@@ -133,8 +140,69 @@ export async function fillInputNearLabel(
       }
       return false;
     },
-    { pattern: labelRe.source, val: value }
+    {
+      pattern: labelRe.source,
+      val: value,
+      maxLen: maxLabelLength,
+      textareaOnly: preferTextarea,
+    }
   );
+}
+
+export async function fillDetailsField(page: Page, message: string): Promise<boolean> {
+  const placeholderSelectors = [
+    'textarea[placeholder*="budget" i]',
+    'textarea[placeholder*="requirement" i]',
+    'textarea[placeholder*="dimension" i]',
+    'textarea[placeholder*="design" i]',
+    'textarea[placeholder*="detail" i]',
+    'textarea[placeholder*="message" i]',
+    'textarea[placeholder*="project" i]',
+    'textarea[aria-label*="detail" i]',
+    'textarea[aria-label*="message" i]',
+    'textarea[name*="detail" i]',
+    'textarea[name*="message" i]',
+    'textarea[name*="project" i]',
+    'textarea[name*="comment" i]',
+    'textarea[id*="detail" i]',
+    'textarea[id*="message" i]',
+  ];
+
+  for (const sel of placeholderSelectors) {
+    const loc = page.locator(sel).first();
+    if (await loc.isVisible({ timeout: 800 }).catch(() => false)) {
+      if (await tryFillLocator(loc, message)) return true;
+    }
+  }
+
+  // Short labels only — avoid matching page titles like "Submit Details for an Instant Quote".
+  if (
+    await fillInputNearLabel(page, /^(project\s+)?details?$/i, message, {
+      maxLabelLength: 24,
+      preferTextarea: true,
+    })
+  ) {
+    return true;
+  }
+
+  if (
+    await fillInputNearLabel(page, /^(project\s+)?(message|comments?|description)$/i, message, {
+      maxLabelLength: 24,
+      preferTextarea: true,
+    })
+  ) {
+    return true;
+  }
+
+  const textareas = page.locator('form textarea, textarea');
+  const count = await textareas.count();
+  for (let i = 0; i < count; i++) {
+    const loc = textareas.nth(i);
+    if (!(await loc.isVisible({ timeout: 500 }).catch(() => false))) continue;
+    if (await tryFillLocator(loc, message)) return true;
+  }
+
+  return false;
 }
 
 async function verifyEmailFilled(page: Page, email: string): Promise<boolean> {
@@ -368,23 +436,12 @@ export async function completeSignageQuoteSteps(
     }
   }
 
-  // Details / message
-  if (await fillInputNearLabel(page, /details/i, message)) {
+  // Details / message — must target the real textarea, not page titles like
+  // "Submit Details for an Instant Quote" (that bug overwrote the name field).
+  if (await fillDetailsField(page, message)) {
     notes.push('Filled details');
   } else {
-    const detailLocators = [
-      'textarea[name*="detail" i]',
-      'textarea[name*="project" i]',
-      'textarea[name*="message" i]',
-      'textarea',
-    ];
-    for (const sel of detailLocators) {
-      const loc = page.locator(sel).first();
-      if (await loc.isVisible({ timeout: 1000 }).catch(() => false)) {
-        if (await tryFillLocator(loc, message)) notes.push('Filled details');
-        break;
-      }
-    }
+    notes.push('Details field fill failed');
   }
 
   // Website address (Signage.inc requires this)

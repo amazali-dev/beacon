@@ -394,6 +394,9 @@ export async function runFormTestForSite(
         }
 
         notes.push(...(await completeSignageQuoteSteps(page, message)));
+        if (/details field fill failed/i.test(notes.join(' '))) {
+          throw new Error('Required details field was not filled');
+        }
         await page.waitForTimeout(800);
 
         await clickQuoteSubmit(page, selectors.submit);
