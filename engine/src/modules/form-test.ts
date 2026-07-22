@@ -327,12 +327,20 @@ export async function runFormTestForSite(
         if ((await fileInput.count()) === 0) {
           logoUploadOk = false;
           notes.push('No file upload field detected');
+          const fallbackUrl = site.main_url || 'https://beacon.test';
+          if (await fillWebsiteOrBusinessFallback(page, fallbackUrl)) {
+            notes.push(
+              `No logo field; filled "Website URL or business name" fallback with ${fallbackUrl}.`
+            );
+          } else {
+            notes.push('No logo field and website URL fallback could not be filled.');
+          }
         } else {
           logoUploadOk = await uploadLogoOnce(page, fileInput, logoCandidates[0]!, 1, notes)
             .catch(() => false);
         }
 
-        if (logoUploadOk === false) {
+        if (logoUploadOk === false && (await fileInput.count()) > 0) {
           const firstShot = await captureFormScreenshot(
             page,
             `form_${site.name}_${runId}_logo_attempt_1`,
@@ -387,23 +395,31 @@ export async function runFormTestForSite(
           if (secondShot) attemptScreenshotPaths.push(secondShot);
 
           if (!logoUploadOk) {
-            notes.push(
-              'Attempt 2 logo upload still failed (often proxy/CDN network error, not home Wi-Fi).'
-            );
             const fallbackUrl = site.main_url || 'https://beacon.test';
+            notes.push(
+              'Logo recovery summary: Attempt 1 upload failed with a network error ' +
+                '(site/CDN/proxy path — not necessarily home Wi-Fi). ' +
+                'Refreshed the same browser session and IP, then retried with another logo. ' +
+                'Attempt 2 also failed.'
+            );
             if (await fillWebsiteOrBusinessFallback(page, fallbackUrl)) {
               notes.push(
-                `Logo upload failed; filled website URL / business name fallback: ${fallbackUrl}`
+                `Fallback used: filled "Website URL or business name" with ${fallbackUrl} ` +
+                  'so the form can still submit without a logo file. Continuing to submit.'
               );
             } else {
-              notes.push('Logo upload failed and website URL fallback field was not found.');
+              notes.push(
+                'Fallback failed: "Website URL or business name" field was not found or could not be filled.'
+              );
               throw new Error(
                 'Required logo upload failed on both attempts, and website URL fallback could not be filled'
               );
             }
           } else {
             logoRecoveredAfterRefresh = true;
-            notes.push('Attempt 2 succeeded after refreshing the page; continuing form submission.');
+            notes.push(
+              'Logo recovery summary: Attempt 1 failed; after same-IP refresh, Attempt 2 logo upload succeeded. Continuing form submission.'
+            );
           }
         }
 

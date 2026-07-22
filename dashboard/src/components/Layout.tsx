@@ -19,7 +19,7 @@ export function Layout() {
   const [openIncidents, setOpenIncidents] = useState(0);
   const [sites, setSites] = useState<Pick<Site, 'id' | 'name' | 'main_url' | 'active'>[]>([]);
   const location = useLocation();
-  const appVersion = import.meta.env.VITE_APP_VERSION || '1.0.0';
+  const appVersion = import.meta.env.VITE_APP_VERSION || '1.1.2';
 
   useEffect(() => {
     const t = setInterval(() => setClock(nowPakistanClock()), 30_000);
