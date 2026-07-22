@@ -45,9 +45,11 @@ import { gotoWithRetries, pageLooksRateLimited, sleep } from '../utils/navigate.
 import {
   clickQuoteSubmit,
   completeSignageQuoteSteps,
+  emailFieldContainsUrl,
   fillContactFields,
   fillEmailField,
   fillWebsiteOrBusinessFallback,
+  forceFillEmailField,
   openQuoteFormIfNeeded,
   waitForThankYou,
 } from './form-fill-helpers.js';
@@ -437,19 +439,17 @@ export async function runFormTestForSite(
         }
         // Always restore configured contact identity after quote steps / website fallback.
         await fillContactFields(page, identity, selectors, notes);
-        const emailLooksLikeUrl = await page.evaluate(() => {
-          const inputs = Array.from(document.querySelectorAll('input'));
-          for (const inp of inputs) {
-            const el = inp as HTMLInputElement;
-            const blob = `${el.type} ${el.name} ${el.id} ${el.placeholder}`.toLowerCase();
-            if (!/email|mail/.test(blob) && el.type !== 'email') continue;
-            return /^https?:\/\//i.test(el.value || '');
-          }
-          return false;
-        });
-        if (emailLooksLikeUrl) {
-          notes.push('Email field still contained a website URL after restore — re-applied TEST_EMAIL.');
+        if (await emailFieldContainsUrl(page)) {
+          notes.push(
+            'Email field still contained a website URL after restore — force-applied TEST_EMAIL.'
+          );
+          await forceFillEmailField(page, identity.email);
           await fillEmailField(page, identity.email, selectors.email);
+        }
+        if (await emailFieldContainsUrl(page)) {
+          throw new Error(
+            'Email field still contains a website URL after restore; refusing to submit'
+          );
         }
         await page.waitForTimeout(800);
 

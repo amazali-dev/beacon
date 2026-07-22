@@ -206,20 +206,109 @@ export async function fillDetailsField(page: Page, message: string): Promise<boo
 }
 
 async function verifyEmailFilled(page: Page, email: string): Promise<boolean> {
-  const prefix = email.split('@')[0]!;
-  const inputs = page.locator(
-    'input[type="email"], input[name*="email" i], input[placeholder*="mail" i], input[placeholder*="@" i]'
-  );
-  const count = await inputs.count();
-  for (let i = 0; i < count; i++) {
-    const val = await inputs.nth(i).inputValue().catch(() => '');
-    if (val === email || val.includes(prefix)) return true;
-  }
+  // Only treat real email fields as proof — never the name field.
+  // Name values like "Amaz@beacon" used to false-pass because they share an email prefix.
   return page.evaluate((expected) => {
-    const prefix = expected.split('@')[0]!;
+    const isEmailInput = (input: HTMLInputElement) => {
+      const type = (input.type || '').toLowerCase();
+      if (type === 'email') return true;
+      const blob = [
+        input.name,
+        input.id,
+        input.placeholder,
+        input.getAttribute('aria-label'),
+        input.autocomplete,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      if (/email|e-mail/.test(blob)) return true;
+      const root = input.closest('label, div, fieldset, li, section') || input.parentElement;
+      const labelText = (root?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+      return /^email\b/i.test(labelText) || /\bemail\s*\*?$/i.test(labelText);
+    };
+
     for (const inp of document.querySelectorAll('input')) {
-      const v = (inp as HTMLInputElement).value || '';
-      if (v === expected || v.includes(prefix)) return true;
+      const input = inp as HTMLInputElement;
+      if (!isEmailInput(input)) continue;
+      const v = (input.value || '').trim();
+      if (!v || /^https?:\/\//i.test(v)) return false;
+      if (v === expected) return true;
+      // Require a real email shape in the email box (must contain @).
+      if (v.includes('@') && expected.includes('@') && v.toLowerCase() === expected.toLowerCase()) {
+        return true;
+      }
+    }
+    return false;
+  }, email);
+}
+
+/** Find the email input even when it is a plain text field under an EMAIL label. */
+export async function emailFieldContainsUrl(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const isEmailInput = (input: HTMLInputElement) => {
+      const type = (input.type || '').toLowerCase();
+      if (type === 'email') return true;
+      const blob = [
+        input.name,
+        input.id,
+        input.placeholder,
+        input.getAttribute('aria-label'),
+        input.autocomplete,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      if (/email|e-mail/.test(blob)) return true;
+      const root = input.closest('label, div, fieldset, li, section') || input.parentElement;
+      const labelText = (root?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 48);
+      return /\bemail\b/i.test(labelText.slice(0, 24));
+    };
+
+    for (const inp of document.querySelectorAll('input')) {
+      const input = inp as HTMLInputElement;
+      if (!isEmailInput(input)) continue;
+      if (/^https?:\/\//i.test((input.value || '').trim())) return true;
+    }
+    return false;
+  });
+}
+
+export async function forceFillEmailField(page: Page, email: string): Promise<boolean> {
+  return page.evaluate((val) => {
+    const isEmailInput = (input: HTMLInputElement) => {
+      const type = (input.type || '').toLowerCase();
+      if (type === 'email') return true;
+      const blob = [
+        input.name,
+        input.id,
+        input.placeholder,
+        input.getAttribute('aria-label'),
+        input.autocomplete,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      if (/website|business name|yourbusiness/.test(blob)) return false;
+      if (/email|e-mail/.test(blob)) return true;
+      const root = input.closest('label, div, fieldset, li, section') || input.parentElement;
+      const labelText = (root?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 48);
+      return /\bemail\b/i.test(labelText.slice(0, 24));
+    };
+
+    for (const inp of document.querySelectorAll('input')) {
+      const input = inp as HTMLInputElement;
+      const rect = input.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+      if (!isEmailInput(input)) continue;
+
+      input.focus();
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(input, val);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      input.dispatchEvent(new Event('blur', { bubbles: true }));
+      return input.value === val;
     }
     return false;
   }, email);
@@ -335,7 +424,8 @@ export async function fillEmailField(page: Page, email: string, selector?: strin
       tryFillLocator(
         page.locator('input[name*="email" i], input[id*="email" i], input[autocomplete="email"]').first(),
         email
-      )
+      ),
+    () => forceFillEmailField(page, email)
   );
 
   for (const attempt of attempts) {
