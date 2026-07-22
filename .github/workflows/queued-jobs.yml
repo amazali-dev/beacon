@@ -82,5 +82,5 @@ jobs:
           PROXY_URL: ${{ secrets.PROXY_URL }}
           PROXY_USERNAME: ${{ secrets.PROXY_USERNAME }}
           PROXY_PASSWORD: ${{ secrets.PROXY_PASSWORD }}
-          ABORT_AFTER_CONSECUTIVE_RATE_LIMITS: ${{ github.event_name == 'workflow_dispatch' && inputs.complete_all_checks == 'true' && '999' || '' }}
+          ABORT_AFTER_CONSECUTIVE_RATE_LIMITS: ${{ github.event_name == 'workflow_dispatch' && inputs.complete_all_checks && '999' || '' }}
         run: npm run drain:jobs
