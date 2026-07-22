@@ -286,44 +286,30 @@ export async function fillPhoneField(
   const attempts: Array<() => Promise<boolean>> = [];
   if (selector) attempts.push(() => fillInput(page, selector, phone));
   attempts.push(
-    () => tryFillLocator(page.getByPlaceholder(/phone|mobile|contact number/i).first(), phone),
-    () => tryFillLocator(page.getByLabel(/phone|mobile|contact number/i).first(), phone),
     () => tryFillLocator(page.locator(PHONE_INPUT_SELECTOR).first(), phone),
-    () => fillInputNearLabel(page, /phone|mobile|contact number/i, phone)
+    () => tryFillLocator(page.getByLabel(/phone|mobile/i).first(), phone),
+    () => fillInputNearLabel(page, /^(phone|mobile)\s*\*?$/i, phone)
   );
-
   for (const attempt of attempts) {
-    // Phone widgets commonly reformat raw digits (for example,
-    // 5555551234 -> (555) 555-1234). The generic fill helper may report
-    // false even though the controlled field visibly contains the number,
-    // so always perform the digit-aware verification after each attempt.
-    await attempt().catch(() => false);
-    if (await verifyPhoneFilled(page, phone)) return true;
+    if (await attempt().catch(() => false)) {
+      if (await verifyPhoneFilled(page, phone)) return true;
+    }
   }
   return false;
 }
 
 export async function fillNameField(page: Page, name: string, selector?: string): Promise<boolean> {
   const attempts: Array<() => Promise<boolean>> = [];
-
-  if (selector) {
-    attempts.push(() => fillInput(page, selector, name));
-  }
-
+  if (selector) attempts.push(() => fillInput(page, selector, name));
   attempts.push(
-    () => tryFillLocator(page.getByLabel(/^name/i).first(), name),
+    () => tryFillLocator(page.getByLabel(/^name|your name/i).first(), name),
     () =>
       tryFillLocator(
-        page
-          .locator('input[name*="name" i]:not([type="email"]):not([type="tel"])')
-          .first(),
+        page.locator('input[name*="name" i]:not([name*="user" i]):not([type="hidden"])').first(),
         name
       ),
-    () => tryFillLocator(page.getByPlaceholder(/your name|full name|^name$/i).first(), name),
-    () => fillInputNearLabel(page, /^name\s*\*?$/i, name),
-    () => fillInputNearLabel(page, /your name|full name/i, name)
+    () => fillInputNearLabel(page, /^(your\s+)?name\s*\*?$/i, name, { maxLabelLength: 20 })
   );
-
   for (const attempt of attempts) {
     if (await attempt().catch(() => false)) {
       if (await verifyNameFilled(page, name)) return true;
@@ -339,12 +325,17 @@ export async function fillEmailField(page: Page, email: string, selector?: strin
     attempts.push(() => fillInput(page, selector, email));
   }
 
+  // Do NOT match bare "@" placeholders — that can hit unrelated fields.
   attempts.push(
-    () => tryFillLocator(page.getByPlaceholder(/example@mail|you@|email|@/i).first(), email),
+    () => tryFillLocator(page.getByPlaceholder(/example@|you@|email/i).first(), email),
     () => tryFillLocator(page.locator('input[type="email"]').first(), email),
     () => tryFillLocator(page.getByLabel(/^email/i).first(), email),
-    () => fillInputNearLabel(page, /^email\s*\*?$/i, email),
-    () => fillInputNearLabel(page, /email/i, email)
+    () => fillInputNearLabel(page, /^email\s*\*?$/i, email, { maxLabelLength: 16 }),
+    () =>
+      tryFillLocator(
+        page.locator('input[name*="email" i], input[id*="email" i], input[autocomplete="email"]').first(),
+        email
+      )
   );
 
   for (const attempt of attempts) {
@@ -355,45 +346,21 @@ export async function fillEmailField(page: Page, email: string, selector?: strin
   return false;
 }
 
+/**
+ * Fill ONLY the logo-fallback website / business-name field.
+ * Must never write into email, phone, or name — previous bugs did that when
+ * matching banner copy like "website URL" and then the first form input.
+ */
 export async function fillWebsiteOrBusinessFallback(
   page: Page,
   websiteOrName: string
 ): Promise<boolean> {
-  // Strict selectors only — never walk up into the contact block and overwrite email.
-  const selectors = [
-    'input[placeholder*="yourbusiness.com" i]',
-    'input[placeholder*="business name" i]',
-    'input[placeholder*="website url" i]',
-    'input[placeholder*="website" i]:not([type="email"]):not([name*="email" i])',
-    'input[aria-label*="website url" i]',
-    'input[aria-label*="website" i]:not([type="email"])',
-    'input[aria-label*="business name" i]',
-    'input[name*="website" i]:not([name*="email" i])',
-    'input[id*="website" i]:not([id*="email" i])',
-    'input[type="url"]',
-  ];
-
-  for (const sel of selectors) {
-    const loc = page.locator(sel).first();
-    if (await loc.isVisible({ timeout: 800 }).catch(() => false)) {
-      const type = await loc.getAttribute('type').catch(() => '');
-      const name = await loc.getAttribute('name').catch(() => '');
-      const placeholder = await loc.getAttribute('placeholder').catch(() => '');
-      const blob = `${type || ''} ${name || ''} ${placeholder || ''}`.toLowerCase();
-      if (/email|phone|tel|mobile/.test(blob)) continue;
-      if (await tryFillLocator(loc, websiteOrName)) return true;
-    }
-  }
-
-  // Find the website label, then fill only the nearest following non-contact input.
   return page.evaluate((val) => {
-    const labelRe = /website\s*url|business\s*name|website\s*or\s*business|^website$/i;
-    const nodes = Array.from(
-      document.querySelectorAll('label, span, p, div, legend, strong, h3, h4')
-    );
-    const isContactField = (input: HTMLInputElement) => {
+    const looksLikeWebsiteField = (input: HTMLInputElement): boolean => {
       const type = (input.type || '').toLowerCase();
-      if (type === 'email' || type === 'tel' || type === 'password') return true;
+      if (['email', 'tel', 'password', 'hidden', 'file', 'checkbox', 'radio'].includes(type)) {
+        return false;
+      }
       const blob = [
         input.name,
         input.id,
@@ -404,40 +371,36 @@ export async function fillWebsiteOrBusinessFallback(
         .filter(Boolean)
         .join(' ')
         .toLowerCase();
-      return (
-        /email|e-mail|phone|tel|mobile/.test(blob) ||
-        (/name/.test(blob) && !/website|business|url|company|brand/.test(blob))
-      );
+      if (/email|e-mail|phone|tel|mobile/.test(blob)) return false;
+      // Require an explicit website/business cue on the input itself.
+      return /website|business\s*name|yourbusiness|company\s*url|\burl\b/.test(blob);
     };
 
-    for (const el of nodes) {
-      if (/^H[12]$/i.test(el.tagName)) continue;
-      const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
-      if (!labelRe.test(text) || text.length > 40) continue;
+    const nearbyLabelIsEmail = (input: HTMLInputElement): boolean => {
+      const root = input.closest('label, div, fieldset, li, section') || input.parentElement;
+      const text = (root?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+      return /^email\b|\bemail\s*\*?$/i.test(text) || /\bemail\b/i.test(text.slice(0, 30));
+    };
 
-      const wrapper =
-        el.closest('label, .form-group, .field, [class*="field" i], div') || el.parentElement;
-      if (!wrapper) continue;
+    const inputs = Array.from(
+      document.querySelectorAll(
+        'input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]):not([type="radio"])'
+      )
+    ) as HTMLInputElement[];
 
-      const inputs = Array.from(
-        wrapper.querySelectorAll(
-          'input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]):not([type="radio"])'
-        )
-      ) as HTMLInputElement[];
+    for (const input of inputs) {
+      const rect = input.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+      if (!looksLikeWebsiteField(input)) continue;
+      if (nearbyLabelIsEmail(input)) continue;
 
-      for (const input of inputs) {
-        const rect = input.getBoundingClientRect();
-        if (rect.width <= 0 || rect.height <= 0) continue;
-        if (isContactField(input)) continue;
-
-        input.focus();
-        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-        setter?.call(input, val);
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-        input.dispatchEvent(new Event('blur', { bubbles: true }));
-        return input.value === val || input.value.includes(val.slice(0, 12));
-      }
+      input.focus();
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(input, val);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      input.dispatchEvent(new Event('blur', { bubbles: true }));
+      return input.value === val || input.value.includes(val.replace(/^https?:\/\//i, '').slice(0, 12));
     }
     return false;
   }, websiteOrName);
@@ -534,7 +497,7 @@ export async function completeSignageQuoteSteps(
     notes.push('Details field fill failed');
   }
 
-  // Website address — always try when forced (logo failed), otherwise best-effort.
+  // Website address — only the dedicated website/business field (never email).
   if (opts?.forceWebsiteFallback) {
     if (await fillWebsiteOrBusinessFallback(page, websiteUrl)) {
       notes.push(`Filled website URL fallback after logo failure: ${websiteUrl}`);
@@ -582,38 +545,34 @@ export async function clickQuoteSubmit(page: Page, selector?: string): Promise<v
     page.locator('button[type="submit"], input[type="submit"]').first(),
   ];
 
-  for (const btn of candidates) {
-    if (await btn.isVisible({ timeout: 1500 }).catch(() => false)) {
-      await btn.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
-      // File-upload widgets may keep the final CTA disabled while the image is uploading.
+  for (const candidate of candidates) {
+    if (await candidate.isVisible({ timeout: 1200 }).catch(() => false)) {
+      await candidate.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
       await page
         .getByText(/uploading/i)
         .first()
         .waitFor({ state: 'hidden', timeout: 30000 })
         .catch(() => {});
-      await btn.click({ timeout: 30000 });
+      await candidate.click({ timeout: 30000 });
       return;
     }
   }
 
-  throw new Error(
-    'Required form submit control was not found or visible (expected Submit, Submit Now, Get Mockup, Get Free Mockup, or equivalent).'
-  );
+  throw new Error('Required form submit control was not found');
 }
 
 export async function waitForThankYou(page: Page, timeoutMs: number): Promise<boolean> {
-  try {
-    await Promise.race([
-      page.waitForURL(/thank|success|confirm|received/i, { timeout: timeoutMs }),
-      page
-        .locator(
-          'text=/thank you|we.?ve received|we.?received|submitted|success|quote.?request|thank you, friend|request is on|already working on it|expect a call/i'
-        )
-        .first()
-        .waitFor({ timeout: timeoutMs }),
-    ]);
-    return true;
-  } catch {
-    return false;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const text = await page.locator('body').innerText().catch(() => '');
+    if (
+      /thank\s*you|we('|\s)?ve\s+received|request\s+received|submitted\s+successfully|mockup.*on\s+the\s+way/i.test(
+        text
+      )
+    ) {
+      return true;
+    }
+    await page.waitForTimeout(500);
   }
+  return false;
 }
