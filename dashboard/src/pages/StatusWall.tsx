@@ -6,10 +6,8 @@ import {
   formTestPassed,
   formTestSummary,
   healthFromChecks,
-  healthLabel,
   healthReasons,
   healthSortOrder,
-  profileLabel,
 } from '../lib/labelMappers';
 import { engineOnline, loadBeaconSettings, type BeaconSettings } from '../lib/operations';
 import { isRateLimitedFormTest } from '../lib/healthScoring';
@@ -331,7 +329,11 @@ export function Dashboard() {
           <h2>Needs attention ({attention.length})</h2>
           <div className="status-grid">
             {attention.map((s) => (
-              <SiteCard key={s.site.id} summary={s} />
+              <SiteCard
+                key={s.site.id}
+                summary={s}
+                slowThresholdMs={settings?.loadTimeThresholdMs || 8000}
+              />
             ))}
           </div>
         </section>
@@ -341,7 +343,11 @@ export function Dashboard() {
         <h2>{attention.length > 0 ? `All clear (${healthy.length})` : `All sites (${filtered.length})`}</h2>
         <div className="status-grid">
           {(attention.length > 0 ? healthy : filtered).map((s) => (
-            <SiteCard key={s.site.id} summary={s} />
+            <SiteCard
+              key={s.site.id}
+              summary={s}
+              slowThresholdMs={settings?.loadTimeThresholdMs || 8000}
+            />
           ))}
         </div>
       </section>
@@ -353,76 +359,133 @@ export function Dashboard() {
   );
 }
 
-function SiteCard({ summary }: { summary: SiteSummary }) {
+function SiteCard({
+  summary,
+  slowThresholdMs = 8000,
+}: {
+  summary: SiteSummary;
+  slowThresholdMs?: number;
+}) {
   const health = effectiveHealth(summary);
   const { site, reasons, lastCheck, openIncidents, latestForm, desktopLoadMs } = summary;
+  const slowThreshold = slowThresholdMs;
 
-  const formNote =
-    latestForm && !formTestPassed(latestForm) ? formTestSummary(latestForm) : '';
+  const statusPill =
+    health === 'green' ? 'Healthy' : health === 'yellow' ? 'Attention' : health === 'red' ? 'Down' : 'Paused';
+
+  const loadTone =
+    desktopLoadMs == null
+      ? 'muted'
+      : desktopLoadMs >= slowThreshold
+        ? 'bad'
+        : desktopLoadMs >= slowThreshold * 0.75
+          ? 'warn'
+          : 'ok';
+  const loadLabel =
+    desktopLoadMs == null
+      ? '—'
+      : desktopLoadMs >= slowThreshold
+        ? 'Slow'
+        : 'OK';
+
+  const formSkipped = latestForm ? isRateLimitedFormTest(latestForm) : false;
+  const formMonitorError = latestForm?.outcome === 'monitor_error';
+  const formOk = latestForm ? !formSkipped && !formMonitorError && formTestPassed(latestForm) : false;
+  const formFail =
+    latestForm && !formSkipped && !formMonitorError && !formTestPassed(latestForm);
+
+  const formTone = !latestForm
+    ? 'muted'
+    : formSkipped || formMonitorError
+      ? 'warn'
+      : formOk
+        ? 'ok'
+        : 'bad';
+  const formTitle = !latestForm
+    ? site.form_testing_enabled
+      ? 'No runs'
+      : 'Off'
+    : formSkipped
+      ? 'Skipped'
+      : formMonitorError
+        ? 'Monitor error'
+        : formOk
+          ? 'Passed'
+          : 'Failed';
+
+  const banners: Array<{ tone: 'warn' | 'bad' | 'ok'; text: string }> = [];
+  for (const reason of reasons.slice(0, 2)) {
+    const tone = /rate.?limit|429|stale/i.test(reason) ? 'warn' : health === 'red' ? 'bad' : 'warn';
+    banners.push({ tone, text: reason });
+  }
+  if (latestForm && formSkipped) {
+    banners.push({ tone: 'warn', text: formTestSummary(latestForm) });
+  } else if (formFail && latestForm) {
+    banners.push({ tone: 'bad', text: formTestSummary(latestForm) });
+  } else if (formOk && latestForm?.logo_upload_ok === true) {
+    banners.push({ tone: 'ok', text: 'Form passed — logo upload OK.' });
+  }
+
+  // Dedupe similar banners
+  const uniqueBanners = banners.filter(
+    (b, i, arr) => arr.findIndex((x) => x.text === b.text) === i
+  ).slice(0, 2);
 
   return (
-    <article className={`status-card health-${health} enriched`}>
-      <header>
+    <article className={`fleet-card health-${health}`}>
+      <header className="fleet-card-head">
         <div>
           <h2>{site.name}</h2>
-          <p className="meta">{healthLabel(health)}</p>
+          <a className="fleet-card-url" href={site.main_url} target="_blank" rel="noreferrer">
+            {site.main_url.replace(/^https?:\/\//i, '').replace(/\/$/, '')}
+          </a>
         </div>
-        <span className={`dot ${health}`} title={healthLabel(health)} />
+        <span className={`fleet-pill fleet-pill-${health}`}>{statusPill}</span>
       </header>
 
-      <p className="url">
-        <a href={site.main_url} target="_blank" rel="noreferrer">
-          {site.main_url}
-        </a>
-      </p>
-
-      <ul className="card-metrics">
+      <ul className="fleet-metrics">
         <li>
-          <span>Load</span>
-          <strong>{desktopLoadMs != null ? `${desktopLoadMs}ms` : '—'}</strong>
-          <span className="meta">{profileLabel('desktop')}</span>
+          <span className="fleet-metric-label">Load time</span>
+          <strong className={`fleet-metric-value tone-${loadTone}`}>
+            {desktopLoadMs != null ? `${desktopLoadMs}ms` : '—'}
+          </strong>
+          <span className={`fleet-metric-tag tone-${loadTone}`}>{loadLabel}</span>
         </li>
         <li>
-          <span>Form</span>
-          <strong>
-            {latestForm
-              ? isRateLimitedFormTest(latestForm)
-                ? 'Skipped'
-                : latestForm.outcome === 'monitor_error'
-                  ? 'Monitor error'
-                : formTestPassed(latestForm)
-                ? 'Passed'
-                : 'Failed'
-              : site.form_testing_enabled
-                ? 'No runs'
-                : 'Off'}
-          </strong>
-          <span className="meta">
+          <span className="fleet-metric-label">Form test</span>
+          <strong className={`fleet-metric-value tone-${formTone}`}>{formTitle}</strong>
+          <span className="fleet-metric-tag meta">
             {latestForm ? formatRelativeTime(latestForm.tested_at) : detectionStatusLabel(site)}
           </span>
         </li>
         <li>
-          <span>Issues</span>
-          <strong>{openIncidents || 'None'}</strong>
-          <span className="meta">Open incidents</span>
+          <span className="fleet-metric-label">Incidents</span>
+          <strong className={`fleet-metric-value ${openIncidents ? 'tone-bad' : 'tone-ok'}`}>
+            {openIncidents || 0}
+          </strong>
+          <span className={`fleet-metric-tag ${openIncidents ? 'tone-bad' : 'meta'}`}>
+            {openIncidents ? 'Open' : 'None'}
+          </span>
         </li>
       </ul>
 
-      {health !== 'green' && (
-        <p className="card-reason">
-          {reasons[0]}
-          {formNote ? ` · ${formNote}` : ''}
-        </p>
+      {uniqueBanners.length > 0 && (
+        <div className="fleet-banners">
+          {uniqueBanners.map((b) => (
+            <p key={b.text} className={`fleet-banner fleet-banner-${b.tone}`}>
+              {b.text}
+            </p>
+          ))}
+        </div>
       )}
 
-      <p className="meta">
-        Last check: {formatRelativeTime(lastCheck)} {TIME_LABEL}
-        {!site.active && ' · Paused'}
-      </p>
-
-      <Link className="subtle-link" to={`/site/${site.id}`}>
-        View site detail →
-      </Link>
+      <footer className="fleet-card-foot">
+        <span>
+          Checked {formatRelativeTime(lastCheck)} {TIME_LABEL}
+          {!site.active ? ' · Paused' : ''}
+        </span>
+        <Link to={`/site/${site.id}`}>View details</Link>
+      </footer>
     </article>
   );
 }
