@@ -355,6 +355,43 @@ export async function fillEmailField(page: Page, email: string, selector?: strin
   return false;
 }
 
+export async function fillWebsiteOrBusinessFallback(
+  page: Page,
+  websiteOrName: string
+): Promise<boolean> {
+  const selectors = [
+    'input[placeholder*="yourbusiness.com" i]',
+    'input[placeholder*="business name" i]',
+    'input[placeholder*="website" i]',
+    'input[aria-label*="website" i]',
+    'input[aria-label*="business" i]',
+    'input[name*="website" i]',
+    'input[name*="business" i]',
+    'input[id*="website" i]',
+    'input[type="url"]',
+  ];
+
+  for (const sel of selectors) {
+    const loc = page.locator(sel).first();
+    if (await loc.isVisible({ timeout: 800 }).catch(() => false)) {
+      if (await tryFillLocator(loc, websiteOrName)) return true;
+    }
+  }
+
+  if (
+    await fillInputNearLabel(
+      page,
+      /website\s*url|business\s*name|website\s*or\s*business/i,
+      websiteOrName,
+      { maxLabelLength: 40 }
+    )
+  ) {
+    return true;
+  }
+
+  return fillInputNearLabel(page, /website/i, websiteOrName, { maxLabelLength: 24 });
+}
+
 export async function fillContactFields(
   page: Page,
   identity: ContactIdentity,
@@ -373,9 +410,11 @@ export async function fillContactFields(
 
 export async function completeSignageQuoteSteps(
   page: Page,
-  message: string
+  message: string,
+  opts?: { websiteUrl?: string; forceWebsiteFallback?: boolean }
 ): Promise<string[]> {
   const notes: string[] = [];
+  const websiteUrl = opts?.websiteUrl || 'https://beacon.test';
 
   // Placements — check BOTH indoor and outdoor when they are checkboxes
   for (const label of ['Indoor', 'Outdoor']) {
@@ -444,8 +483,14 @@ export async function completeSignageQuoteSteps(
     notes.push('Details field fill failed');
   }
 
-  // Website address (Signage.inc requires this)
-  if (await fillInputNearLabel(page, /website/i, 'https://beacon.test')) {
+  // Website address — always try when forced (logo failed), otherwise best-effort.
+  if (opts?.forceWebsiteFallback) {
+    if (await fillWebsiteOrBusinessFallback(page, websiteUrl)) {
+      notes.push(`Filled website URL fallback after logo failure: ${websiteUrl}`);
+    } else {
+      notes.push('Website URL fallback fill failed after logo upload failure');
+    }
+  } else if (await fillWebsiteOrBusinessFallback(page, websiteUrl)) {
     notes.push('Filled website address');
   }
 

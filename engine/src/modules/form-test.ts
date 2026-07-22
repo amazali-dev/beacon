@@ -46,6 +46,7 @@ import {
   clickQuoteSubmit,
   completeSignageQuoteSteps,
   fillContactFields,
+  fillWebsiteOrBusinessFallback,
   openQuoteFormIfNeeded,
   waitForThankYou,
 } from './form-fill-helpers.js';
@@ -386,14 +387,32 @@ export async function runFormTestForSite(
           if (secondShot) attemptScreenshotPaths.push(secondShot);
 
           if (!logoUploadOk) {
-            notes.push('Attempt 2 remained unsuccessful after refreshing the page.');
-            throw new Error('Required logo upload failed on both attempts, including after refresh');
+            notes.push(
+              'Attempt 2 logo upload still failed (often proxy/CDN network error, not home Wi-Fi).'
+            );
+            const fallbackUrl = site.main_url || 'https://beacon.test';
+            if (await fillWebsiteOrBusinessFallback(page, fallbackUrl)) {
+              notes.push(
+                `Logo upload failed; filled website URL / business name fallback: ${fallbackUrl}`
+              );
+            } else {
+              notes.push('Logo upload failed and website URL fallback field was not found.');
+              throw new Error(
+                'Required logo upload failed on both attempts, and website URL fallback could not be filled'
+              );
+            }
+          } else {
+            logoRecoveredAfterRefresh = true;
+            notes.push('Attempt 2 succeeded after refreshing the page; continuing form submission.');
           }
-          logoRecoveredAfterRefresh = true;
-          notes.push('Attempt 2 succeeded after refreshing the page; continuing form submission.');
         }
 
-        notes.push(...(await completeSignageQuoteSteps(page, message)));
+        notes.push(
+          ...(await completeSignageQuoteSteps(page, message, {
+            websiteUrl: site.main_url || 'https://beacon.test',
+            forceWebsiteFallback: logoUploadOk === false,
+          }))
+        );
         if (/details field fill failed/i.test(notes.join(' '))) {
           throw new Error('Required details field was not filled');
         }
