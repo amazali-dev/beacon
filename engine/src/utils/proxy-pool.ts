@@ -23,8 +23,8 @@ export type ProxyEgress = {
 
 let poolPromise: Promise<StoredProxy[]> | null = null;
 const blockedThisRun = new Set<string>();
-const proxyByBrandThisRun = new Map<string, string>();
-const proxiesAssignedThisRun = new Set<string>();
+/** Prefer unused proxies within a run before reusing any. */
+const proxiesUsedThisRun = new Set<string>();
 
 function validStoredProxy(value: unknown): value is StoredProxy {
   if (!value || typeof value !== 'object') return false;
@@ -82,19 +82,10 @@ async function pool(): Promise<StoredProxy[]> {
   return poolPromise;
 }
 
-function hash(value: string): number {
-  let result = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    result ^= value.charCodeAt(index);
-    result = Math.imul(result, 16777619);
-  }
-  return result >>> 0;
-}
-
 /**
- * Assign one healthy fallback per brand for this workflow run. Brands receive
- * different proxies until every available proxy has been assigned; only then
- * is reuse allowed. The same brand keeps its proxy across profiles and forms.
+ * Pick a healthy fallback proxy for this check.
+ * Random each call — not sticky for a whole run. Prefers proxies not yet
+ * used in this run until the pool is exhausted, then reshuffles.
  */
 export async function selectFallbackProxy(brandId: string): Promise<SelectedProxy | null> {
   const available = (await pool())
@@ -111,19 +102,11 @@ export async function selectFallbackProxy(brandId: string): Promise<SelectedProx
 
   if (available.length === 0) return null;
 
-  const existingId = proxyByBrandThisRun.get(brandId);
-  const existing = existingId
-    ? available.find((entry) => entry.id === existingId)
-    : undefined;
-  if (existing) return existing;
-
-  const unused = available.filter((entry) => !proxiesAssignedThisRun.has(entry.id));
+  const unused = available.filter((entry) => !proxiesUsedThisRun.has(entry.id));
   const candidates = unused.length > 0 ? unused : available;
-  const halfHourBucket = Math.floor(Date.now() / (30 * 60 * 1000));
-  const selected = candidates[hash(`${brandId}:${halfHourBucket}`) % candidates.length];
-  proxyByBrandThisRun.set(brandId, selected.id);
-  proxiesAssignedThisRun.add(selected.id);
-  console.log(`  assigned ${selected.label} to brand ${brandId} for this run`);
+  const selected = candidates[Math.floor(Math.random() * candidates.length)];
+  proxiesUsedThisRun.add(selected.id);
+  console.log(`  assigned ${selected.label} at random for brand ${brandId}`);
   return selected;
 }
 

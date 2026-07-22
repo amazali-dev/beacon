@@ -141,7 +141,8 @@ export function ProxySettings() {
         <ol className="schedule-readonly">
           <li>
             <strong>Attempt 1 — preferred proxy:</strong> when the fallback pool is enabled,
-            Beacon opens the site through a US proxy first to avoid burned GitHub runner IPs.
+            Beacon opens the site through a randomly chosen US proxy (prefers unused
+            entries in the current run first).
           </li>
           <li>
             <strong>Attempt 2 — alternate path:</strong> if that path is rate-limited, one
@@ -150,8 +151,8 @@ export function ProxySettings() {
           </li>
         </ol>
         <p className="section-hint">
-          Each brand keeps one fallback during a workflow run; other brands receive different
-          proxies while capacity permits. HTTP 503 is never treated as a rate limit.
+          Each check picks a proxy at random from the healthy pool. HTTP 503 is never
+          treated as a rate limit.
         </p>
       </section>
 
