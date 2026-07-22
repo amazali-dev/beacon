@@ -403,9 +403,12 @@ export async function runLoadCheckForSiteProfile(
     consoleErrors,
     failedRequests,
   } = attempt;
+  const rateLimitEvidence =
+    statusCode === 429 || /HTTP 429|rate-?limited|too many requests/i.test(notes || '');
   const outcome = classifyCheckOutcome({
     statusCode,
     completedSuccessfully: loaded,
+    rateLimitEvidence,
     egressVerified,
   });
 
@@ -458,17 +461,18 @@ export async function runLoadCheckForSiteProfile(
 
   // A definite 429 is a monitor/CDN block — record it, but do not call the site down.
   // A 503 follows the hard-failure path below because it can be real unavailability.
-  if (!egressVerified) {
+  const rateLimited =
+    result.statusCode === 429 || /HTTP 429|rate-?limited|too many requests/i.test(result.notes || '');
+  if (rateLimited) {
+    await closeIncident(site.id, 'load_failure');
+    await closeIncident(site.id, 'check_failed_to_run');
+  } else if (!egressVerified) {
     await openIncident({
       site_id: site.id,
       type: 'check_failed_to_run',
       detail: `${site.name} [${profile}] monitor egress could not be verified. ${result.notes || ''}`,
       screenshot_path: result.screenshotPath,
     });
-  } else if (result.statusCode === 429) {
-    await closeIncident(site.id, 'load_failure');
-    // Keep a single open rate_limited note (openIncident dedupes by open type if supported;
-    // if not, we still avoid email spam via cooldown when we skip maybeSendAlert here)
   } else if (!result.loaded || (result.statusCode !== null && result.statusCode >= 400)) {
     const id = await openIncident({
       site_id: site.id,

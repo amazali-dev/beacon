@@ -39,6 +39,7 @@ jobs:
       - name: Validate production configuration
         env:
           PRECHECK_KIND: report
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           REPORT_TO: ${{ secrets.REPORT_TO }}

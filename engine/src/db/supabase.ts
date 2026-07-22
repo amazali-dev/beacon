@@ -176,28 +176,30 @@ export async function openIncident(row: {
   const isProduction = row.is_production ?? getDeploymentMode() === 'production';
   const existing = await findOpenIncident(row.site_id, row.type, isProduction);
   if (existing) {
+    const patch: Record<string, unknown> = {
+      detail: row.detail,
+      screenshot_path: row.screenshot_path || null,
+    };
+    if (row.screenshot_paths) patch.screenshot_paths = row.screenshot_paths;
     const { error } = await getSupabase()
       .from('incidents')
-      .update({
-        detail: row.detail,
-        screenshot_path: row.screenshot_path || null,
-        screenshot_paths: row.screenshot_paths || [],
-      })
+      .update(patch)
       .eq('id', existing.id);
     if (error) throw new Error(error.message);
     return existing.id;
   }
+  const insertRow: Record<string, unknown> = {
+    site_id: row.site_id,
+    type: row.type,
+    detail: row.detail,
+    screenshot_path: row.screenshot_path || null,
+    alerted: false,
+    is_production: isProduction,
+  };
+  if (row.screenshot_paths) insertRow.screenshot_paths = row.screenshot_paths;
   const { data, error } = await getSupabase()
     .from('incidents')
-    .insert({
-      site_id: row.site_id,
-      type: row.type,
-      detail: row.detail,
-      screenshot_path: row.screenshot_path || null,
-      screenshot_paths: row.screenshot_paths || [],
-      alerted: false,
-      is_production: isProduction,
-    })
+    .insert(insertRow)
     .select('id')
     .single();
   if (error?.code === '23505') {

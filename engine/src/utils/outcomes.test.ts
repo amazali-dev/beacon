@@ -14,6 +14,14 @@ test('429 is rate limited but 503 remains a site failure', () => {
   );
   assert.equal(
     classifyCheckOutcome({
+      statusCode: 429,
+      completedSuccessfully: false,
+      egressVerified: false,
+    }),
+    'rate_limited'
+  );
+  assert.equal(
+    classifyCheckOutcome({
       statusCode: 503,
       completedSuccessfully: false,
       egressVerified: true,

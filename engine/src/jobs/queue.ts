@@ -49,7 +49,14 @@ async function runJobType(jobType: CheckJobType, siteId: string | null): Promise
 export async function processPendingJobs(limit = 5): Promise<number> {
   let ran = 0;
   for (let i = 0; i < limit; i++) {
-    const job = await claimNextJob();
+    let job: { id: string; job_type: CheckJobType; site_id: string | null } | null;
+    try {
+      job = await claimNextJob();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`Could not claim next dashboard job: ${message}`);
+      throw new Error(`Queue claim failed: ${message}`);
+    }
     if (!job) break;
     console.log(`\n=== Dashboard job: ${job.job_type} (${job.id}) ===`);
     try {
@@ -58,7 +65,15 @@ export async function processPendingJobs(limit = 5): Promise<number> {
       ran += 1;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      await finishJob(job.id, false, message);
+      try {
+        await finishJob(job.id, false, message.slice(0, 1800));
+      } catch (finishErr) {
+        console.error(
+          `Could not mark job ${job.id} failed: ${
+            finishErr instanceof Error ? finishErr.message : String(finishErr)
+          }`
+        );
+      }
       console.error(`Job failed: ${message}`);
       ran += 1;
     }

@@ -130,7 +130,15 @@ export async function claimNextJob(): Promise<{
   });
   if (error) throw new Error(`Could not claim queued job: ${error.message}`);
   if (!data) return null;
-  return data as { id: string; job_type: CheckJobType; site_id: string | null };
+
+  // Support both the jsonb RPC payload and older composite-row responses.
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row || typeof row !== 'object') return null;
+  const job = row as { id?: string; job_type?: CheckJobType; site_id?: string | null };
+  if (!job.id || !job.job_type) {
+    throw new Error(`Claimed job payload was incomplete: ${JSON.stringify(row)}`);
+  }
+  return { id: job.id, job_type: job.job_type, site_id: job.site_id ?? null };
 }
 
 export async function finishJob(

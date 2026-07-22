@@ -12,8 +12,10 @@ export function classifyCheckOutcome(input: {
   monitorError?: boolean;
   egressVerified: boolean;
 }): CheckOutcome {
-  if (input.monitorError || !input.egressVerified) return 'monitor_error';
+  // CDN blocks are not monitor failures. Keep them ahead of egress warnings so
+  // a 429 + unverified fallback proxy is still reported as rate-limited.
   if (input.rateLimitEvidence || input.statusCode === 429) return 'rate_limited';
+  if (input.monitorError || !input.egressVerified) return 'monitor_error';
   if (
     input.completedSuccessfully &&
     input.statusCode !== null &&
