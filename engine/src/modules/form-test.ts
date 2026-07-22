@@ -30,6 +30,7 @@ import { getBrowserLaunchOptions } from '../utils/browser.js';
 import { withMonitorParam } from '../utils/monitor-param.js';
 import {
   markProxyBlocked,
+  selectAlternateProxy,
   selectFallbackProxy,
   type SelectedProxy,
   verifyProxyEgress,
@@ -156,8 +157,8 @@ export async function runFormTestForSite(
   const formUrl = withMonitorParam(siteReady.quote_form_url || siteReady.main_url);
   const logoCandidates = await selectLogoCandidates(site.id);
 
-  // Prefer proxy-first when the pool has capacity. GitHub runner IPs are the
-  // most rate-limited path and should not consume Attempt 1 by default.
+  // Prefer the paid proxy pool when enabled. Never fall back to GitHub runner
+  // IPs while the pool has capacity — those datacenter exits are already burned.
   selectedProxy = await selectFallbackProxy(site.id);
   let browser = await chromium.launch(
     getBrowserLaunchOptions(
@@ -177,7 +178,7 @@ export async function runFormTestForSite(
     : null;
   if (selectedProxy && context) {
     proxyUsed = true;
-    notes.push(`Attempt 1 uses ${selectedProxy.label} first to avoid burned GitHub runner IPs.`);
+    notes.push(`Attempt 1 uses ${selectedProxy.label} (sticky for this brand).`);
     const egress = await verifyProxyEgress(context);
     checkCountry = egress.country;
     checkIp = egress.ip;
@@ -193,7 +194,7 @@ export async function runFormTestForSite(
       });
     }
     console.log(
-      `  proxy-first ${selectedProxy.label}: ${egress.country || 'unknown country'} / ${egress.ip || 'unknown IP'}`
+      `  proxy ${selectedProxy.label}: ${egress.country || 'unknown country'} / ${egress.ip || 'unknown IP'}`
     );
   }
   let page = context
@@ -222,81 +223,61 @@ export async function runFormTestForSite(
       await markProxyBlocked(selectedProxy, 'HTTP 429 from target');
     }
 
-    if (navigationBlocked) {
-      if (selectedProxy) {
-        notes.push('Proxy-first path was rate-limited; retrying once direct from the runner.');
-        console.log(`  proxy-first form attempt was rate-limited; retrying once direct`);
-        await browser.close();
-        browser = await chromium.launch(
-          getBrowserLaunchOptions({
-            headless: opts?.headed ? false : true,
-            slowMo: opts?.headed ? 250 : 0,
-          }, null)
+    if (navigationBlocked && selectedProxy) {
+      const alternate = await selectAlternateProxy(site.id, selectedProxy.id);
+      if (alternate) {
+        notes.push(
+          `Proxy path was rate-limited; retrying once via alternate ${alternate.label}.`
         );
-        page = await browser.newPage({
+        console.log(`  proxy form attempt was rate-limited; retrying via ${alternate.label}`);
+        await browser.close();
+        selectedProxy = alternate;
+        proxyUsed = true;
+        browser = await chromium.launch(
+          getBrowserLaunchOptions(
+            {
+              headless: opts?.headed ? false : true,
+              slowMo: opts?.headed ? 250 : 0,
+            },
+            alternate.launch
+          )
+        );
+        const proxyContext = await browser.newContext({
           viewport: { width: 1440, height: 900 },
           locale: 'en-US',
           timezoneId: 'America/New_York',
         });
-        checkCountry = geo.country;
-        checkIp = geo.ip;
-        egressVerified =
-          !productionEgressRequired || (geo.isUs && Boolean(geo.country && geo.ip));
-        nav = await gotoWithRetries(page, formUrl, 1);
-        directStatus = nav.statusCode;
-        notes.push(`Attempt 2 direct: HTTP ${nav.statusCode ?? 'no response'}.`);
-        if (nav.note) notes.push(nav.note);
-        navigationBlocked = nav.rateLimited || (await pageLooksRateLimited(page));
-      } else {
-        const proxy = await selectFallbackProxy(site.id);
-        if (proxy) {
-          selectedProxy = proxy;
-          proxyUsed = true;
-          notes.push(
-            `Attempt 1 direct was rate-limited${nav.statusCode ? ` (HTTP ${nav.statusCode})` : ''}. Attempt 2 uses ${proxy.label}.`
-          );
-          console.log(`  direct form attempt was rate-limited; retrying once via ${proxy.label}`);
-          await browser.close();
-          browser = await chromium.launch(
-            getBrowserLaunchOptions(
-              {
-                headless: opts?.headed ? false : true,
-                slowMo: opts?.headed ? 250 : 0,
-              },
-              proxy.launch
-            )
-          );
-          const proxyContext = await browser.newContext({
-            viewport: { width: 1440, height: 900 },
-            locale: 'en-US',
-            timezoneId: 'America/New_York',
+        const egress = await verifyProxyEgress(proxyContext);
+        checkCountry = egress.country;
+        checkIp = egress.ip;
+        egressVerified = productionEgressRequired
+          ? (egress.country || '').toUpperCase() === config.requiredCountry.toUpperCase() &&
+            Boolean(egress.ip)
+          : Boolean(egress.ip);
+        if (!egressVerified) {
+          monitorError = true;
+          notes.push('Alternate proxy egress was not verified in the required country.');
+          await markProxyBlocked(alternate, 'Unknown or non-US proxy egress', {
+            persistCooldownMinutes: 60,
           });
-          const egress = await verifyProxyEgress(proxyContext);
-          checkCountry = egress.country;
-          checkIp = egress.ip;
-          egressVerified = productionEgressRequired
-            ? (egress.country || '').toUpperCase() === config.requiredCountry.toUpperCase() &&
-              Boolean(egress.ip)
-            : Boolean(egress.ip);
-          if (!egressVerified) {
-            monitorError = true;
-            notes.push('Proxy egress was not verified in the required country.');
-            await markProxyBlocked(proxy, 'Unknown or non-US proxy egress', {
-              persistCooldownMinutes: 60,
-            });
-          }
-          console.log(
-            `  fallback ${proxy.label}: ${egress.country || 'unknown country'} / ${egress.ip || 'unknown IP'}`
-          );
-          page = await proxyContext.newPage();
-          nav = await gotoWithRetries(page, formUrl, 1);
-          fallbackStatus = nav.statusCode;
-          notes.push(`Attempt 2 ${proxy.label}: HTTP ${nav.statusCode ?? 'no response'}.`);
-          navigationBlocked = nav.rateLimited || (await pageLooksRateLimited(page));
-          if (navigationBlocked) await markProxyBlocked(proxy, 'HTTP 429 from target');
-        } else {
-          notes.push('No enabled fallback proxy was available.');
         }
+        console.log(
+          `  alternate ${alternate.label}: ${egress.country || 'unknown country'} / ${egress.ip || 'unknown IP'}`
+        );
+        page = await proxyContext.newPage();
+        nav = await gotoWithRetries(page, formUrl, 1);
+        fallbackStatus = nav.statusCode;
+        notes.push(`Attempt 2 ${alternate.label}: HTTP ${nav.statusCode ?? 'no response'}.`);
+        if (nav.note) notes.push(nav.note);
+        navigationBlocked =
+          !egressVerified || nav.rateLimited || (await pageLooksRateLimited(page));
+        if (navigationBlocked && (nav.rateLimited || (await pageLooksRateLimited(page)))) {
+          await markProxyBlocked(alternate, 'HTTP 429 from target');
+        }
+      } else {
+        notes.push(
+          'No alternate proxy was available. Skipped GitHub direct egress while the paid proxy pool is enabled.'
+        );
       }
     }
 

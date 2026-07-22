@@ -17,6 +17,7 @@ import { getBrowserLaunchOptions } from '../utils/browser.js';
 import { withMonitorParam } from '../utils/monitor-param.js';
 import {
   markProxyBlocked,
+  selectAlternateProxy,
   selectFallbackProxy,
   verifyProxyEgress,
   type SelectedProxy,
@@ -340,9 +341,8 @@ export async function runLoadCheckForSiteProfile(
   const url = withMonitorParam(site.main_url);
   const productionEgressRequired = geo.deploymentMode === 'production';
 
-  // Prefer a fallback proxy first when the pool has capacity. GitHub runner IPs
-  // are heavily rate-limited; opening with them first wastes the only retry and
-  // burns reputation before a clean egress is even tried.
+  // Prefer the paid proxy pool when enabled. Never fall back to GitHub runner
+  // IPs while the pool has capacity — those datacenter exits are already burned.
   let selectedProxy = await selectFallbackProxy(site.id);
   let attempt = await runLoadAttempt(site, profile, url, selectedProxy || undefined);
   let directStatus: number | null = selectedProxy ? null : attempt.statusCode;
@@ -372,72 +372,54 @@ export async function runLoadCheckForSiteProfile(
     }
   }
 
-  // If the preferred proxy path was blocked, try one alternate path once.
+  // If the preferred proxy path was blocked, try one alternate proxy once.
+  // Do not retry via GitHub direct while the pool is in use.
   if (attempt.statusCode === 429 || (selectedProxy && !egressVerified)) {
     if (selectedProxy) {
-      console.log(
-        `  proxy-first attempt was blocked; retrying once direct from the runner`
-      );
+      const alternate = await selectAlternateProxy(site.id, selectedProxy.id);
       const proxyNote = attempt.notes || `Attempt 1 ${selectedProxy.label} was blocked.`;
-      try {
-        const direct = await runLoadAttempt(site, profile, url);
-        directStatus = direct.statusCode;
-        direct.notes =
-          `${proxyNote} Attempt 2 direct: ${direct.statusCode ?? 'no response'}. ${direct.notes || ''}`;
-        attempt = direct;
-        checkCountry = geo.country;
-        checkIp = geo.ip;
-        egressVerified =
-          !productionEgressRequired || (geo.isUs && Boolean(geo.country && geo.ip));
-        proxyUsed = true;
-      } catch (err) {
-        attempt.notes =
-          `${proxyNote} Direct retry could not run: ` +
-          `${err instanceof Error ? err.message : String(err)}`;
-      }
-    } else {
-      const proxy = await selectFallbackProxy(site.id);
-      if (proxy) {
-        console.log(`  direct attempt returned HTTP 429; retrying once via ${proxy.label}`);
-        const directNote = attempt.notes || 'Direct attempt returned HTTP 429.';
+      if (alternate) {
+        console.log(
+          `  proxy attempt was blocked; retrying once via alternate ${alternate.label}`
+        );
         try {
-          proxyUsed = true;
-          selectedProxy = proxy;
-          const fallback = await runLoadAttempt(site, profile, url, proxy);
-          fallbackStatus = fallback.statusCode;
-          if (fallback.statusCode === 429) await markProxyBlocked(proxy, 'HTTP 429 from target');
-          fallback.notes =
-            `Attempt 1 direct: HTTP 429. Attempt 2 ${proxy.label}: ` +
-            `${fallback.statusCode ?? 'no response'}. ${fallback.notes || ''}`;
-          attempt = fallback;
-          checkCountry = fallback.country;
-          checkIp = fallback.ip;
+          selectedProxy = alternate;
+          const retry = await runLoadAttempt(site, profile, url, alternate);
+          fallbackStatus = retry.statusCode;
+          if (retry.statusCode === 429) await markProxyBlocked(alternate, 'HTTP 429 from target');
+          retry.notes =
+            `${proxyNote} Attempt 2 ${alternate.label}: ` +
+            `${retry.statusCode ?? 'no response'}. ${retry.notes || ''}`;
+          attempt = retry;
+          checkCountry = retry.country;
+          checkIp = retry.ip;
           egressVerified = productionEgressRequired
-            ? (fallback.country || '').toUpperCase() === config.requiredCountry.toUpperCase() &&
-              Boolean(fallback.ip)
-            : Boolean(fallback.ip);
+            ? (retry.country || '').toUpperCase() === config.requiredCountry.toUpperCase() &&
+              Boolean(retry.ip)
+            : Boolean(retry.ip);
           if (!egressVerified) {
-            fallback.notes =
-              `${fallback.notes || ''} ` +
+            attempt.notes =
+              `${attempt.notes || ''} ` +
               'Proxy egress was not verified in the required country; excluded from site health.';
-            await markProxyBlocked(proxy, 'Unknown or non-US proxy egress', {
+            await markProxyBlocked(alternate, 'Unknown or non-US proxy egress', {
               persistCooldownMinutes: 60,
             });
           }
+          proxyUsed = true;
         } catch (err) {
           await markProxyBlocked(
-            proxy,
-            `Fallback execution failed: ${err instanceof Error ? err.message : String(err)}`,
+            alternate,
+            `Alternate proxy failed: ${err instanceof Error ? err.message : String(err)}`,
             { persistCooldownMinutes: 60 }
           );
           attempt.notes =
-            `${directNote} Fallback ${proxy.label} could not run: ` +
+            `${proxyNote} Alternate ${alternate.label} could not run: ` +
             `${err instanceof Error ? err.message : String(err)}`;
         }
       } else {
         attempt.notes =
-          `${attempt.notes || 'Direct attempt returned HTTP 429.'} ` +
-          'No enabled fallback proxy was available.';
+          `${proxyNote} No alternate proxy was available. ` +
+          'Skipped GitHub direct egress while the paid proxy pool is enabled.';
       }
     }
   }

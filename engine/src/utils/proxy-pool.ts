@@ -23,8 +23,10 @@ export type ProxyEgress = {
 
 let poolPromise: Promise<StoredProxy[]> | null = null;
 const blockedThisRun = new Set<string>();
-/** Prefer unused proxies within a run before reusing any. */
-const proxiesUsedThisRun = new Set<string>();
+/** One primary proxy per brand for the whole workflow run. */
+const proxyByBrandThisRun = new Map<string, string>();
+/** Prefer unused proxies when assigning brands / alternate retries. */
+const proxiesAssignedThisRun = new Set<string>();
 
 function validStoredProxy(value: unknown): value is StoredProxy {
   if (!value || typeof value !== 'object') return false;
@@ -82,32 +84,80 @@ async function pool(): Promise<StoredProxy[]> {
   return poolPromise;
 }
 
+function toSelected(entry: StoredProxy, index: number): SelectedProxy {
+  return {
+    id: entry.id || `proxy-${index + 1}`,
+    label: entry.label || `Fallback ${index + 1}`,
+    launch: {
+      server: entry.server,
+      ...(entry.username ? { username: entry.username } : {}),
+      ...(entry.password ? { password: entry.password } : {}),
+    },
+  };
+}
+
+async function listAvailable(excludeIds: string[] = []): Promise<SelectedProxy[]> {
+  const exclude = new Set(excludeIds);
+  return (await pool())
+    .map((entry, index) => toSelected(entry, index))
+    .filter((entry) => !blockedThisRun.has(entry.id) && !exclude.has(entry.id));
+}
+
+function pickRandom(candidates: SelectedProxy[]): SelectedProxy {
+  return candidates[Math.floor(Math.random() * candidates.length)];
+}
+
 /**
- * Pick a healthy fallback proxy for this check.
- * Random each call — not sticky for a whole run. Prefers proxies not yet
- * used in this run until the pool is exhausted, then reshuffles.
+ * Assign one healthy proxy per brand for this workflow run. Brands receive
+ * different proxies until every available proxy has been assigned; only then
+ * is reuse allowed. The same brand keeps its proxy across profiles and forms.
  */
 export async function selectFallbackProxy(brandId: string): Promise<SelectedProxy | null> {
-  const available = (await pool())
-    .map((entry, index) => ({
-      id: entry.id || `proxy-${index + 1}`,
-      label: entry.label || `Fallback ${index + 1}`,
-      launch: {
-        server: entry.server,
-        ...(entry.username ? { username: entry.username } : {}),
-        ...(entry.password ? { password: entry.password } : {}),
-      },
-    }))
-    .filter((entry) => !blockedThisRun.has(entry.id));
-
+  const available = await listAvailable();
   if (available.length === 0) return null;
 
-  const unused = available.filter((entry) => !proxiesUsedThisRun.has(entry.id));
+  const existingId = proxyByBrandThisRun.get(brandId);
+  const existing = existingId
+    ? available.find((entry) => entry.id === existingId)
+    : undefined;
+  if (existing) return existing;
+
+  const unused = available.filter((entry) => !proxiesAssignedThisRun.has(entry.id));
   const candidates = unused.length > 0 ? unused : available;
-  const selected = candidates[Math.floor(Math.random() * candidates.length)];
-  proxiesUsedThisRun.add(selected.id);
-  console.log(`  assigned ${selected.label} at random for brand ${brandId}`);
+  const selected = pickRandom(candidates);
+  proxyByBrandThisRun.set(brandId, selected.id);
+  proxiesAssignedThisRun.add(selected.id);
+  console.log(`  assigned ${selected.label} to brand ${brandId} for this run`);
   return selected;
+}
+
+/**
+ * Pick a different healthy proxy for a one-shot retry (never GitHub direct).
+ * Does not change the brand's sticky primary unless that primary is blocked.
+ */
+export async function selectAlternateProxy(
+  brandId: string,
+  excludeProxyId: string
+): Promise<SelectedProxy | null> {
+  const available = await listAvailable([excludeProxyId]);
+  if (available.length === 0) return null;
+
+  const unused = available.filter((entry) => !proxiesAssignedThisRun.has(entry.id));
+  const candidates = unused.length > 0 ? unused : available;
+  const selected = pickRandom(candidates);
+  proxiesAssignedThisRun.add(selected.id);
+  // If the brand's sticky proxy is blocked, promote this alternate for later profiles.
+  const stickyId = proxyByBrandThisRun.get(brandId);
+  if (!stickyId || blockedThisRun.has(stickyId)) {
+    proxyByBrandThisRun.set(brandId, selected.id);
+  }
+  console.log(`  alternate ${selected.label} for brand ${brandId} (retry)`);
+  return selected;
+}
+
+/** True when an enabled vault/env proxy pool has at least one entry this process can use. */
+export async function hasProxyPoolCapacity(): Promise<boolean> {
+  return (await pool()).length > 0;
 }
 
 /**
