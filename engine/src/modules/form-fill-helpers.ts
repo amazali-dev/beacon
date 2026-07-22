@@ -205,13 +205,18 @@ export async function fillDetailsField(page: Page, message: string): Promise<boo
   return false;
 }
 
+/**
+ * NOTE: Never declare nested named helpers inside page.evaluate callbacks.
+ * tsx/esbuild keep-names injects `__name(...)` into those helpers; Playwright
+ * serializes the function source into the browser, where `__name` does not exist.
+ */
 async function verifyEmailFilled(page: Page, email: string): Promise<boolean> {
   // Only treat real email fields as proof — never the name field.
   // Name values like "Amaz@beacon" used to false-pass because they share an email prefix.
   return page.evaluate((expected) => {
-    const isEmailInput = (input: HTMLInputElement) => {
+    for (const inp of document.querySelectorAll('input')) {
+      const input = inp as HTMLInputElement;
       const type = (input.type || '').toLowerCase();
-      if (type === 'email') return true;
       const blob = [
         input.name,
         input.id,
@@ -222,15 +227,14 @@ async function verifyEmailFilled(page: Page, email: string): Promise<boolean> {
         .filter(Boolean)
         .join(' ')
         .toLowerCase();
-      if (/email|e-mail/.test(blob)) return true;
       const root = input.closest('label, div, fieldset, li, section') || input.parentElement;
       const labelText = (root?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 40);
-      return /^email\b/i.test(labelText) || /\bemail\s*\*?$/i.test(labelText);
-    };
-
-    for (const inp of document.querySelectorAll('input')) {
-      const input = inp as HTMLInputElement;
-      if (!isEmailInput(input)) continue;
+      const isEmail =
+        type === 'email' ||
+        /email|e-mail/.test(blob) ||
+        /^email\b/i.test(labelText) ||
+        /\bemail\s*\*?$/i.test(labelText);
+      if (!isEmail) continue;
       const v = (input.value || '').trim();
       if (!v || /^https?:\/\//i.test(v)) return false;
       if (v === expected) return true;
@@ -246,9 +250,9 @@ async function verifyEmailFilled(page: Page, email: string): Promise<boolean> {
 /** Find the email input even when it is a plain text field under an EMAIL label. */
 export async function emailFieldContainsUrl(page: Page): Promise<boolean> {
   return page.evaluate(() => {
-    const isEmailInput = (input: HTMLInputElement) => {
+    for (const inp of document.querySelectorAll('input')) {
+      const input = inp as HTMLInputElement;
       const type = (input.type || '').toLowerCase();
-      if (type === 'email') return true;
       const blob = [
         input.name,
         input.id,
@@ -259,15 +263,11 @@ export async function emailFieldContainsUrl(page: Page): Promise<boolean> {
         .filter(Boolean)
         .join(' ')
         .toLowerCase();
-      if (/email|e-mail/.test(blob)) return true;
       const root = input.closest('label, div, fieldset, li, section') || input.parentElement;
       const labelText = (root?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 48);
-      return /\bemail\b/i.test(labelText.slice(0, 24));
-    };
-
-    for (const inp of document.querySelectorAll('input')) {
-      const input = inp as HTMLInputElement;
-      if (!isEmailInput(input)) continue;
+      const isEmail =
+        type === 'email' || /email|e-mail/.test(blob) || /\bemail\b/i.test(labelText.slice(0, 24));
+      if (!isEmail) continue;
       if (/^https?:\/\//i.test((input.value || '').trim())) return true;
     }
     return false;
@@ -276,9 +276,12 @@ export async function emailFieldContainsUrl(page: Page): Promise<boolean> {
 
 export async function forceFillEmailField(page: Page, email: string): Promise<boolean> {
   return page.evaluate((val) => {
-    const isEmailInput = (input: HTMLInputElement) => {
+    for (const inp of document.querySelectorAll('input')) {
+      const input = inp as HTMLInputElement;
+      const rect = input.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+
       const type = (input.type || '').toLowerCase();
-      if (type === 'email') return true;
       const blob = [
         input.name,
         input.id,
@@ -289,18 +292,12 @@ export async function forceFillEmailField(page: Page, email: string): Promise<bo
         .filter(Boolean)
         .join(' ')
         .toLowerCase();
-      if (/website|business name|yourbusiness/.test(blob)) return false;
-      if (/email|e-mail/.test(blob)) return true;
+      if (/website|business name|yourbusiness/.test(blob)) continue;
       const root = input.closest('label, div, fieldset, li, section') || input.parentElement;
       const labelText = (root?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 48);
-      return /\bemail\b/i.test(labelText.slice(0, 24));
-    };
-
-    for (const inp of document.querySelectorAll('input')) {
-      const input = inp as HTMLInputElement;
-      const rect = input.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) continue;
-      if (!isEmailInput(input)) continue;
+      const isEmail =
+        type === 'email' || /email|e-mail/.test(blob) || /\bemail\b/i.test(labelText.slice(0, 24));
+      if (!isEmail) continue;
 
       input.focus();
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
@@ -445,11 +442,21 @@ export async function fillWebsiteOrBusinessFallback(
   page: Page,
   websiteOrName: string
 ): Promise<boolean> {
+  // Keep this evaluate body free of nested named helpers (tsx `__name` / Playwright).
   return page.evaluate((val) => {
-    const looksLikeWebsiteField = (input: HTMLInputElement): boolean => {
+    const inputs = Array.from(
+      document.querySelectorAll(
+        'input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]):not([type="radio"])'
+      )
+    ) as HTMLInputElement[];
+
+    for (const input of inputs) {
+      const rect = input.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+
       const type = (input.type || '').toLowerCase();
       if (['email', 'tel', 'password', 'hidden', 'file', 'checkbox', 'radio'].includes(type)) {
-        return false;
+        continue;
       }
       const blob = [
         input.name,
@@ -461,28 +468,13 @@ export async function fillWebsiteOrBusinessFallback(
         .filter(Boolean)
         .join(' ')
         .toLowerCase();
-      if (/email|e-mail|phone|tel|mobile/.test(blob)) return false;
+      if (/email|e-mail|phone|tel|mobile/.test(blob)) continue;
       // Require an explicit website/business cue on the input itself.
-      return /website|business\s*name|yourbusiness|company\s*url|\burl\b/.test(blob);
-    };
+      if (!/website|business\s*name|yourbusiness|company\s*url|\burl\b/.test(blob)) continue;
 
-    const nearbyLabelIsEmail = (input: HTMLInputElement): boolean => {
       const root = input.closest('label, div, fieldset, li, section') || input.parentElement;
       const text = (root?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 80);
-      return /^email\b|\bemail\s*\*?$/i.test(text) || /\bemail\b/i.test(text.slice(0, 30));
-    };
-
-    const inputs = Array.from(
-      document.querySelectorAll(
-        'input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]):not([type="radio"])'
-      )
-    ) as HTMLInputElement[];
-
-    for (const input of inputs) {
-      const rect = input.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) continue;
-      if (!looksLikeWebsiteField(input)) continue;
-      if (nearbyLabelIsEmail(input)) continue;
+      if (/^email\b|\bemail\s*\*?$/i.test(text) || /\bemail\b/i.test(text.slice(0, 30))) continue;
 
       input.focus();
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
