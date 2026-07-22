@@ -5,7 +5,7 @@
  */
 
 import { devices, chromium, webkit, type Browser, type Page } from 'playwright';
-import { getEnv, loadConfig } from '../config.js';
+import { getAbortAfterConsecutiveRateLimits, getEnv, loadConfig } from '../config.js';
 import {
   closeIncident,
   countRecentSlowChecks,
@@ -645,7 +645,7 @@ export async function runAllLoadChecks(opts: {
   const betweenChecks = cfg.delayMsBetweenChecks ?? 12000;
   const betweenProfiles = cfg.delayMsBetweenProfiles ?? 20000;
   const afterRateLimit = cfg.delayMsAfterRateLimit ?? 8000;
-  const abortAfter = cfg.abortAfterConsecutiveRateLimits ?? 3;
+  const abortAfter = getAbortAfterConsecutiveRateLimits();
   let consecutiveRateLimits = 0;
   let completedChecks = 0;
 

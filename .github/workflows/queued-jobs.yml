@@ -8,6 +8,11 @@ on:
     # Backup poll — GitHub cron is often late; prefer manual Run workflow after dashboard click
     - cron: "2,17,32,47 * * * *"
   workflow_dispatch:
+    inputs:
+      complete_all_checks:
+        description: Run every site/profile even after rate limits (one-off)
+        type: boolean
+        default: false
 
 concurrency:
   group: queued-jobs
@@ -77,4 +82,5 @@ jobs:
           PROXY_URL: ${{ secrets.PROXY_URL }}
           PROXY_USERNAME: ${{ secrets.PROXY_USERNAME }}
           PROXY_PASSWORD: ${{ secrets.PROXY_PASSWORD }}
+          ABORT_AFTER_CONSECUTIVE_RATE_LIMITS: ${{ github.event_name == 'workflow_dispatch' && inputs.complete_all_checks == 'true' && '999' || '' }}
         run: npm run drain:jobs

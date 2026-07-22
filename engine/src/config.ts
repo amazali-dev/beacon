@@ -79,3 +79,10 @@ export function isInboxVerificationEnabled(): boolean {
   if (getEnv('FORM_INBOX_VERIFICATION', '').toLowerCase() === 'false') return false;
   return loadConfig().formInboxVerificationEnabled ?? false;
 }
+
+/** Override via ABORT_AFTER_CONSECUTIVE_RATE_LIMITS for one-off full runs. */
+export function getAbortAfterConsecutiveRateLimits(): number {
+  const fromEnv = Number(getEnv('ABORT_AFTER_CONSECUTIVE_RATE_LIMITS'));
+  if (Number.isFinite(fromEnv) && fromEnv > 0) return fromEnv;
+  return loadConfig().abortAfterConsecutiveRateLimits ?? 3;
+}

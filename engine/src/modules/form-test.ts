@@ -9,7 +9,13 @@
  */
 
 import { chromium, type Locator, type Page } from 'playwright';
-import { getEnv, getTestIdentity, isInboxVerificationEnabled, loadConfig } from '../config.js';
+import {
+  getAbortAfterConsecutiveRateLimits,
+  getEnv,
+  getTestIdentity,
+  isInboxVerificationEnabled,
+  loadConfig,
+} from '../config.js';
 import {
   fetchActiveSites,
   insertFormTest,
@@ -600,7 +606,7 @@ export async function runAllFormTests(opts: {
   }
 
   const pauseMs = loadConfig().delayMsBetweenChecks ?? 12000;
-  const abortAfter = loadConfig().abortAfterConsecutiveRateLimits ?? 3;
+  const abortAfter = getAbortAfterConsecutiveRateLimits();
   let consecutiveRateLimits = 0;
   let completedChecks = 0;
 
