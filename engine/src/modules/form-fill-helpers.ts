@@ -214,9 +214,17 @@ async function verifyEmailFilled(page: Page, email: string): Promise<boolean> {
   // Only treat real email fields as proof — never the name field.
   // Name values like "Amaz@beacon" used to false-pass because they share an email prefix.
   return page.evaluate((expected) => {
+    const expectedLower = expected.toLowerCase();
+
     for (const inp of document.querySelectorAll('input')) {
       const input = inp as HTMLInputElement;
       const type = (input.type || '').toLowerCase();
+      if (['hidden', 'file', 'checkbox', 'radio', 'submit', 'button', 'reset'].includes(type)) {
+        continue;
+      }
+      const rect = input.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+
       const blob = [
         input.name,
         input.id,
@@ -227,21 +235,40 @@ async function verifyEmailFilled(page: Page, email: string): Promise<boolean> {
         .filter(Boolean)
         .join(' ')
         .toLowerCase();
-      const root = input.closest('label, div, fieldset, li, section') || input.parentElement;
-      const labelText = (root?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+      // Prefer a nearby label, not a huge parent that contains every field label.
+      const labelEl =
+        (input.id && document.querySelector(`label[for="${CSS.escape(input.id)}"]`)) ||
+        input.closest('label');
+      const labelText = (
+        labelEl?.textContent ||
+        input.previousElementSibling?.textContent ||
+        ''
+      )
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 40);
       const isEmail =
         type === 'email' ||
         /email|e-mail/.test(blob) ||
         /^email\b/i.test(labelText) ||
         /\bemail\s*\*?$/i.test(labelText);
       if (!isEmail) continue;
+
       const v = (input.value || '').trim();
-      if (!v || /^https?:\/\//i.test(v)) return false;
-      if (v === expected) return true;
-      // Require a real email shape in the email box (must contain @).
-      if (v.includes('@') && expected.includes('@') && v.toLowerCase() === expected.toLowerCase()) {
-        return true;
-      }
+      // Empty or URL in *this* email box is not proof — keep scanning others.
+      if (!v || /^https?:\/\//i.test(v)) continue;
+      if (v.toLowerCase() === expectedLower) return true;
+    }
+
+    // Last resort: exact email value in any visible non-name-looking input that contains @.
+    for (const inp of document.querySelectorAll('input')) {
+      const input = inp as HTMLInputElement;
+      const type = (input.type || '').toLowerCase();
+      if (['hidden', 'file', 'checkbox', 'radio', 'submit', 'button'].includes(type)) continue;
+      const rect = input.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+      const v = (input.value || '').trim();
+      if (v.toLowerCase() === expectedLower && v.includes('@')) return true;
     }
     return false;
   }, email);
@@ -253,6 +280,10 @@ export async function emailFieldContainsUrl(page: Page): Promise<boolean> {
     for (const inp of document.querySelectorAll('input')) {
       const input = inp as HTMLInputElement;
       const type = (input.type || '').toLowerCase();
+      if (['hidden', 'file', 'checkbox', 'radio', 'submit', 'button'].includes(type)) continue;
+      const rect = input.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+
       const blob = [
         input.name,
         input.id,
@@ -263,8 +294,17 @@ export async function emailFieldContainsUrl(page: Page): Promise<boolean> {
         .filter(Boolean)
         .join(' ')
         .toLowerCase();
-      const root = input.closest('label, div, fieldset, li, section') || input.parentElement;
-      const labelText = (root?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 48);
+      const labelEl =
+        (input.id && document.querySelector(`label[for="${CSS.escape(input.id)}"]`)) ||
+        input.closest('label');
+      const labelText = (
+        labelEl?.textContent ||
+        input.previousElementSibling?.textContent ||
+        ''
+      )
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 48);
       const isEmail =
         type === 'email' || /email|e-mail/.test(blob) || /\bemail\b/i.test(labelText.slice(0, 24));
       if (!isEmail) continue;
@@ -282,6 +322,7 @@ export async function forceFillEmailField(page: Page, email: string): Promise<bo
       if (rect.width <= 0 || rect.height <= 0) continue;
 
       const type = (input.type || '').toLowerCase();
+      if (['hidden', 'file', 'checkbox', 'radio', 'submit', 'button'].includes(type)) continue;
       const blob = [
         input.name,
         input.id,
@@ -293,8 +334,17 @@ export async function forceFillEmailField(page: Page, email: string): Promise<bo
         .join(' ')
         .toLowerCase();
       if (/website|business name|yourbusiness/.test(blob)) continue;
-      const root = input.closest('label, div, fieldset, li, section') || input.parentElement;
-      const labelText = (root?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 48);
+      const labelEl =
+        (input.id && document.querySelector(`label[for="${CSS.escape(input.id)}"]`)) ||
+        input.closest('label');
+      const labelText = (
+        labelEl?.textContent ||
+        input.previousElementSibling?.textContent ||
+        ''
+      )
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 48);
       const isEmail =
         type === 'email' || /email|e-mail/.test(blob) || /\bemail\b/i.test(labelText.slice(0, 24));
       if (!isEmail) continue;
@@ -361,7 +411,61 @@ async function verifyPhoneFilled(page: Page, phone: string): Promise<boolean> {
     const value = await inputs.nth(i).inputValue().catch(() => '');
     if (phoneDigitsMatch(value, phone)) return true;
   }
-  return false;
+
+  // Many signage forms use plain text inputs with only a visual "Phone" label —
+  // fillInputNearLabel succeeds, but PHONE_INPUT_SELECTOR misses them.
+  return page.evaluate((expected) => {
+    const expectedDigits = expected.replace(/\D/g, '');
+    if (!expectedDigits) return false;
+    const comparableLength = Math.min(10, expectedDigits.length);
+    const want = expectedDigits.slice(-comparableLength);
+
+    for (const inp of document.querySelectorAll('input')) {
+      const input = inp as HTMLInputElement;
+      const type = (input.type || '').toLowerCase();
+      if (['hidden', 'file', 'checkbox', 'radio', 'email', 'submit', 'button'].includes(type)) {
+        continue;
+      }
+      const rect = input.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+
+      const v = (input.value || '').trim();
+      if (!v || v.includes('@')) continue;
+      const actualDigits = v.replace(/\D/g, '');
+      if (!actualDigits.endsWith(want)) continue;
+
+      const blob = [
+        input.name,
+        input.id,
+        input.placeholder,
+        input.getAttribute('aria-label'),
+        input.autocomplete,
+        input.inputMode,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      const labelEl =
+        (input.id && document.querySelector(`label[for="${CSS.escape(input.id)}"]`)) ||
+        input.closest('label');
+      const labelText = (
+        labelEl?.textContent ||
+        input.previousElementSibling?.textContent ||
+        ''
+      )
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 40);
+      const looksPhone =
+        type === 'tel' ||
+        input.inputMode === 'tel' ||
+        /phone|mobile|tel/.test(blob) ||
+        /\bphone\b|\bmobile\b/i.test(labelText);
+      // Accept digit match on a short phone-sized value even without attributes.
+      if (looksPhone || (actualDigits.length >= 10 && actualDigits.length <= 15)) return true;
+    }
+    return false;
+  }, phone);
 }
 
 export async function fillPhoneField(
@@ -381,7 +485,8 @@ export async function fillPhoneField(
       if (await verifyPhoneFilled(page, phone)) return true;
     }
   }
-  return false;
+  // Fill may have succeeded via label match while an earlier verify was too strict.
+  return verifyPhoneFilled(page, phone);
 }
 
 export async function fillNameField(page: Page, name: string, selector?: string): Promise<boolean> {
@@ -430,7 +535,8 @@ export async function fillEmailField(page: Page, email: string, selector?: strin
       if (await verifyEmailFilled(page, email)) return true;
     }
   }
-  return false;
+  // Fill may already have written the value; only verification was wrong before.
+  return verifyEmailFilled(page, email);
 }
 
 /**
