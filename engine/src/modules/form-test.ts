@@ -361,6 +361,12 @@ export async function runFormTestForSite(
           await openQuoteFormIfNeeded(page);
           await fillContactFields(page, identity, selectors, notes);
           if (/name field fill failed|email field fill failed|phone field fill failed/i.test(notes.join(' '))) {
+            const fieldsShot = await captureFormScreenshot(
+              page,
+              `form_${site.name}_${runId}_logo_attempt_2_fields`,
+              'failure'
+            );
+            if (fieldsShot) attemptScreenshotPaths.push(fieldsShot);
             throw new Error('Required contact fields were not filled after the logo-upload refresh');
           }
 
@@ -471,6 +477,12 @@ export async function runFormTestForSite(
     } catch {
       /* ignore */
     }
+  }
+  if (
+    screenshotPath &&
+    !attemptScreenshotPaths.includes(screenshotPath)
+  ) {
+    attemptScreenshotPaths.push(screenshotPath);
   }
 
   await browser.close();

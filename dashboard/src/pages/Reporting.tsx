@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ScreenshotModal, ScreenshotThumb } from '../components/ScreenshotModal';
+import { ScreenshotModal, ScreenshotThumb, ScreenshotEvidence, collectScreenshotPaths } from '../components/ScreenshotModal';
 import {
   HEALTH_SCORING_CONFIG,
   type ScoreComponent,
@@ -839,10 +839,13 @@ export function Reporting() {
                       <p className="run-location">{formatRunLocation(form)}</p>
                       <p className="evidence-notes">{form.notes || 'No additional notes.'}</p>
                     </div>
-                    <ScreenshotThumb
-                      src={form.screenshot_path}
-                      alt={title}
-                      onOpen={(src) => setModal({ src, alt: title })}
+                    <ScreenshotEvidence
+                      paths={collectScreenshotPaths(
+                        form.attempt_screenshot_paths,
+                        form.screenshot_path
+                      )}
+                      altBase={title}
+                      onOpen={(src, alt) => setModal({ src, alt })}
                     />
                   </article>
                 );

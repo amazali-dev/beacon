@@ -121,3 +121,48 @@ export function ScreenshotThumb({ src, alt = 'Screenshot', onOpen }: ThumbProps)
     </button>
   );
 }
+
+/** Prefer attempt_* paths; fall back to the single screenshot_path. */
+export function collectScreenshotPaths(
+  paths: Array<string | null | undefined> | null | undefined,
+  primary?: string | null
+): string[] {
+  const ordered = [...(paths || []), primary];
+  return Array.from(new Set(ordered.filter((path): path is string => Boolean(path))));
+}
+
+type EvidenceProps = {
+  paths: string[];
+  altBase: string;
+  onOpen: (src: string, alt: string) => void;
+  labels?: string[];
+};
+
+/** Shows one or more labeled screenshot thumbs (Attempt 1 / Attempt 2). */
+export function ScreenshotEvidence({ paths, altBase, onOpen, labels }: EvidenceProps) {
+  if (paths.length === 0) return <span className="muted-text">—</span>;
+  if (paths.length === 1) {
+    return (
+      <ScreenshotThumb
+        src={paths[0]}
+        alt={altBase}
+        onOpen={(src) => onOpen(src, altBase)}
+      />
+    );
+  }
+
+  return (
+    <div className="incident-evidence">
+      {paths.map((path, index) => {
+        const label = labels?.[index] || `Attempt ${index + 1}`;
+        const alt = `${altBase} — ${label}`;
+        return (
+          <div key={`${path}-${index}`}>
+            <span>{label}</span>
+            <ScreenshotThumb src={path} alt={alt} onOpen={(src) => onOpen(src, alt)} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}

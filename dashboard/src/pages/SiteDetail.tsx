@@ -3,7 +3,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { TabBar } from '../components/TabBar';
 import { SiteCharts } from '../components/SiteCharts';
 import { Timeline } from '../components/Timeline';
-import { ScreenshotModal, ScreenshotThumb } from '../components/ScreenshotModal';
+import { ScreenshotModal, ScreenshotThumb, ScreenshotEvidence, collectScreenshotPaths } from '../components/ScreenshotModal';
 import { supabase } from '../lib/supabase';
 import {
   detectionStatusLabel,
@@ -308,10 +308,13 @@ export function SiteDetail() {
                 </p>
                 <p className="run-location">Accessed from: {formatRunLocation(latestForm)}</p>
                 {latestForm.notes && <p className="notes-block">{latestForm.notes}</p>}
-                <ScreenshotThumb
-                  src={latestForm.screenshot_path}
-                  alt={`Form test ${latestForm.run_id}`}
-                  onOpen={(src) => openShot(src, `Form test ${latestForm.run_id}`)}
+                <ScreenshotEvidence
+                  paths={collectScreenshotPaths(
+                    latestForm.attempt_screenshot_paths,
+                    latestForm.screenshot_path
+                  )}
+                  altBase={`Form test ${latestForm.run_id}`}
+                  onOpen={(src, alt) => openShot(src, alt)}
                 />
               </>
             )}
@@ -501,10 +504,10 @@ export function SiteDetail() {
                     </td>
                     <td className="notes-cell">{f.notes || '—'}</td>
                     <td>
-                      <ScreenshotThumb
-                        src={f.screenshot_path}
-                        alt={f.run_id}
-                        onOpen={(src) => openShot(src, f.run_id)}
+                      <ScreenshotEvidence
+                        paths={collectScreenshotPaths(f.attempt_screenshot_paths, f.screenshot_path)}
+                        altBase={f.run_id}
+                        onOpen={(src, alt) => openShot(src, alt)}
                       />
                     </td>
                   </tr>
@@ -530,10 +533,10 @@ export function SiteDetail() {
                 </header>
                 <p>{incidentDetailPlain(i)}</p>
                 <p className="meta">Opened {formatPakistanTime(i.opened_at)} {TIME_LABEL}</p>
-                <ScreenshotThumb
-                  src={i.screenshot_path}
-                  alt={incidentTypeLabel(i.type)}
-                  onOpen={(src) => openShot(src, incidentTypeLabel(i.type))}
+                <ScreenshotEvidence
+                  paths={collectScreenshotPaths(i.screenshot_paths, i.screenshot_path)}
+                  altBase={incidentTypeLabel(i.type)}
+                  onOpen={(src, alt) => openShot(src, alt)}
                 />
               </article>
             ))
@@ -558,10 +561,10 @@ export function SiteDetail() {
                 <p className="meta">
                   Opened {formatPakistanTime(i.opened_at)} · Closed {formatPakistanTime(i.closed_at)}
                 </p>
-                <ScreenshotThumb
-                  src={i.screenshot_path}
-                  alt={incidentTypeLabel(i.type)}
-                  onOpen={(src) => openShot(src, incidentTypeLabel(i.type))}
+                <ScreenshotEvidence
+                  paths={collectScreenshotPaths(i.screenshot_paths, i.screenshot_path)}
+                  altBase={incidentTypeLabel(i.type)}
+                  onOpen={(src, alt) => openShot(src, alt)}
                 />
               </article>
             ))}

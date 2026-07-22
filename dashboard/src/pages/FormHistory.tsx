@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { ScreenshotModal, ScreenshotThumb } from '../components/ScreenshotModal';
+import { ScreenshotModal, ScreenshotEvidence, collectScreenshotPaths } from '../components/ScreenshotModal';
 import { formTestPassed, formTestSummary, formatRunLocation } from '../lib/labelMappers';
 import { isRateLimitedFormTest } from '../lib/healthScoring';
 import { formatPakistanTime, formatRelativeTime, TIME_LABEL } from '../lib/time';
@@ -134,10 +134,10 @@ export function FormHistory() {
                 </td>
                 <td className="notes-cell">{r.notes || '—'}</td>
                 <td>
-                  <ScreenshotThumb
-                    src={r.screenshot_path}
-                    alt={r.run_id}
-                    onOpen={(src) => setModal({ src, alt: r.run_id })}
+                  <ScreenshotEvidence
+                    paths={collectScreenshotPaths(r.attempt_screenshot_paths, r.screenshot_path)}
+                    altBase={r.run_id}
+                    onOpen={(src, alt) => setModal({ src, alt })}
                   />
                 </td>
               </tr>
