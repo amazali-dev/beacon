@@ -1,14 +1,13 @@
-# Load + render checks — every 30 minutes on GitHub-hosted US runners.
+# Load + render checks — hourly on GitHub-hosted US runners.
 # Manual "Run workflow" is also available (for testing or the future Run Now button).
 
 name: Load checks
 
 # Triggers: GitHub schedule (often delayed) + manual Run workflow.
-# For reliable every-30-min runs, also use an external free cron (see chat instructions).
 on:
   schedule:
-    # Offset from :00/:30 to reduce GitHub dropping jobs at busy times
-    - cron: "7,37 * * * *"
+    # Hourly to reduce CDN rate-limit pressure after prolonged 429 blocks.
+    - cron: "17 * * * *"
   workflow_dispatch:
 
 concurrency:

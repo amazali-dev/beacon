@@ -140,11 +140,13 @@ export function ProxySettings() {
         <h2>How attempts work</h2>
         <ol className="schedule-readonly">
           <li>
-            <strong>Attempt 1 — direct:</strong> GitHub’s US runner visits the site normally.
+            <strong>Attempt 1 — preferred proxy:</strong> when the fallback pool is enabled,
+            Beacon opens the site through a US proxy first to avoid burned GitHub runner IPs.
           </li>
           <li>
-            <strong>Attempt 2 — fallback:</strong> only an HTTP 429 selects one proxy from the
-            rotating pool. There are no further attempts.
+            <strong>Attempt 2 — alternate path:</strong> if that path is rate-limited, one
+            retry uses the other path (direct runner or another proxy). There are no further
+            attempts.
           </li>
         </ol>
         <p className="section-hint">

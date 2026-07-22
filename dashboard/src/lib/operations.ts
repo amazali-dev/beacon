@@ -32,7 +32,7 @@ export type OperationalAlert = {
 export type JobType = 'load_check' | 'form_test' | 'detect_forms' | 'daily_report';
 
 const DEFAULTS: BeaconSettings = {
-  loadCheckIntervalMinutes: 30,
+  loadCheckIntervalMinutes: 60,
   formTestTimesEastern: [
     '00:00',
     '02:00',

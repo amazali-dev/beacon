@@ -150,76 +150,147 @@ export async function runFormTestForSite(
   const formUrl = withMonitorParam(siteReady.quote_form_url || siteReady.main_url);
   const logoCandidates = await selectLogoCandidates(site.id);
 
+  // Prefer proxy-first when the pool has capacity. GitHub runner IPs are the
+  // most rate-limited path and should not consume Attempt 1 by default.
+  selectedProxy = await selectFallbackProxy(site.id);
   let browser = await chromium.launch(
-    getBrowserLaunchOptions({
-      headless: opts?.headed ? false : true,
-      slowMo: opts?.headed ? 250 : 0,
-    }, null)
+    getBrowserLaunchOptions(
+      {
+        headless: opts?.headed ? false : true,
+        slowMo: opts?.headed ? 250 : 0,
+      },
+      selectedProxy?.launch ?? null
+    )
   );
-  let page = await browser.newPage({
-    viewport: { width: 1440, height: 900 },
-    locale: 'en-US',
-    timezoneId: 'America/New_York',
-  });
+  let context = selectedProxy
+    ? await browser.newContext({
+        viewport: { width: 1440, height: 900 },
+        locale: 'en-US',
+        timezoneId: 'America/New_York',
+      })
+    : null;
+  if (selectedProxy && context) {
+    proxyUsed = true;
+    notes.push(`Attempt 1 uses ${selectedProxy.label} first to avoid burned GitHub runner IPs.`);
+    const egress = await verifyProxyEgress(context);
+    checkCountry = egress.country;
+    checkIp = egress.ip;
+    egressVerified = productionEgressRequired
+      ? (egress.country || '').toUpperCase() === config.requiredCountry.toUpperCase() &&
+        Boolean(egress.ip)
+      : Boolean(egress.ip);
+    if (!egressVerified) {
+      monitorError = true;
+      notes.push('Proxy egress was not verified in the required country.');
+      await markProxyBlocked(selectedProxy, 'Unknown or non-US proxy egress', {
+        persistCooldownMinutes: 60,
+      });
+    }
+    console.log(
+      `  proxy-first ${selectedProxy.label}: ${egress.country || 'unknown country'} / ${egress.ip || 'unknown IP'}`
+    );
+  }
+  let page = context
+    ? await context.newPage()
+    : await browser.newPage({
+        viewport: { width: 1440, height: 900 },
+        locale: 'en-US',
+        timezoneId: 'America/New_York',
+      });
   let submittedAt = Date.now();
 
   try {
     let nav = await gotoWithRetries(page, formUrl, 1);
-    directStatus = nav.statusCode;
+    if (selectedProxy) {
+      fallbackStatus = nav.statusCode;
+      notes.push(`Attempt 1 ${selectedProxy.label}: HTTP ${nav.statusCode ?? 'no response'}.`);
+    } else {
+      directStatus = nav.statusCode;
+    }
     if (nav.note) notes.push(nav.note);
-    let navigationBlocked = nav.rateLimited || (await pageLooksRateLimited(page));
+    let navigationBlocked =
+      (selectedProxy && !egressVerified) ||
+      nav.rateLimited ||
+      (await pageLooksRateLimited(page));
+    if (navigationBlocked && selectedProxy && (nav.rateLimited || (await pageLooksRateLimited(page)))) {
+      await markProxyBlocked(selectedProxy, 'HTTP 429 from target');
+    }
 
     if (navigationBlocked) {
-      const proxy = await selectFallbackProxy(site.id);
-      if (proxy) {
-        selectedProxy = proxy;
-        proxyUsed = true;
-        notes.push(
-          `Attempt 1 direct was rate-limited${nav.statusCode ? ` (HTTP ${nav.statusCode})` : ''}. Attempt 2 uses ${proxy.label}.`
-        );
-        console.log(`  direct form attempt was rate-limited; retrying once via ${proxy.label}`);
+      if (selectedProxy) {
+        notes.push('Proxy-first path was rate-limited; retrying once direct from the runner.');
+        console.log(`  proxy-first form attempt was rate-limited; retrying once direct`);
         await browser.close();
         browser = await chromium.launch(
-          getBrowserLaunchOptions(
-            {
-              headless: opts?.headed ? false : true,
-              slowMo: opts?.headed ? 250 : 0,
-            },
-            proxy.launch
-          )
+          getBrowserLaunchOptions({
+            headless: opts?.headed ? false : true,
+            slowMo: opts?.headed ? 250 : 0,
+          }, null)
         );
-        const context = await browser.newContext({
+        page = await browser.newPage({
           viewport: { width: 1440, height: 900 },
           locale: 'en-US',
           timezoneId: 'America/New_York',
         });
-        const egress = await verifyProxyEgress(context);
-        // Do not label proxied traffic with the GitHub runner's direct location.
-        checkCountry = egress.country;
-        checkIp = egress.ip;
-        egressVerified = productionEgressRequired
-          ? (egress.country || '').toUpperCase() === config.requiredCountry.toUpperCase() &&
-            Boolean(egress.ip)
-          : Boolean(egress.ip);
-        if (!egressVerified) {
-          monitorError = true;
-          notes.push('Proxy egress was not verified in the required country.');
-          await markProxyBlocked(proxy, 'Unknown or non-US proxy egress', {
-            persistCooldownMinutes: 60,
-          });
-        }
-        console.log(
-          `  fallback ${proxy.label}: ${egress.country || 'unknown country'} / ${egress.ip || 'unknown IP'}`
-        );
-        page = await context.newPage();
+        checkCountry = geo.country;
+        checkIp = geo.ip;
+        egressVerified =
+          !productionEgressRequired || (geo.isUs && Boolean(geo.country && geo.ip));
         nav = await gotoWithRetries(page, formUrl, 1);
-        fallbackStatus = nav.statusCode;
-        notes.push(`Attempt 2 ${proxy.label}: HTTP ${nav.statusCode ?? 'no response'}.`);
+        directStatus = nav.statusCode;
+        notes.push(`Attempt 2 direct: HTTP ${nav.statusCode ?? 'no response'}.`);
+        if (nav.note) notes.push(nav.note);
         navigationBlocked = nav.rateLimited || (await pageLooksRateLimited(page));
-        // Target 429/soft-block: skip for this run only. Do not empty the pool.
-        if (navigationBlocked) await markProxyBlocked(proxy, 'HTTP 429 from target');
       } else {
-        notes.push('No enabled fallback proxy was available.');
+        const proxy = await selectFallbackProxy(site.id);
+        if (proxy) {
+          selectedProxy = proxy;
+          proxyUsed = true;
+          notes.push(
+            `Attempt 1 direct was rate-limited${nav.statusCode ? ` (HTTP ${nav.statusCode})` : ''}. Attempt 2 uses ${proxy.label}.`
+          );
+          console.log(`  direct form attempt was rate-limited; retrying once via ${proxy.label}`);
+          await browser.close();
+          browser = await chromium.launch(
+            getBrowserLaunchOptions(
+              {
+                headless: opts?.headed ? false : true,
+                slowMo: opts?.headed ? 250 : 0,
+              },
+              proxy.launch
+            )
+          );
+          const proxyContext = await browser.newContext({
+            viewport: { width: 1440, height: 900 },
+            locale: 'en-US',
+            timezoneId: 'America/New_York',
+          });
+          const egress = await verifyProxyEgress(proxyContext);
+          checkCountry = egress.country;
+          checkIp = egress.ip;
+          egressVerified = productionEgressRequired
+            ? (egress.country || '').toUpperCase() === config.requiredCountry.toUpperCase() &&
+              Boolean(egress.ip)
+            : Boolean(egress.ip);
+          if (!egressVerified) {
+            monitorError = true;
+            notes.push('Proxy egress was not verified in the required country.');
+            await markProxyBlocked(proxy, 'Unknown or non-US proxy egress', {
+              persistCooldownMinutes: 60,
+            });
+          }
+          console.log(
+            `  fallback ${proxy.label}: ${egress.country || 'unknown country'} / ${egress.ip || 'unknown IP'}`
+          );
+          page = await proxyContext.newPage();
+          nav = await gotoWithRetries(page, formUrl, 1);
+          fallbackStatus = nav.statusCode;
+          notes.push(`Attempt 2 ${proxy.label}: HTTP ${nav.statusCode ?? 'no response'}.`);
+          navigationBlocked = nav.rateLimited || (await pageLooksRateLimited(page));
+          if (navigationBlocked) await markProxyBlocked(proxy, 'HTTP 429 from target');
+        } else {
+          notes.push('No enabled fallback proxy was available.');
+        }
       }
     }
 
