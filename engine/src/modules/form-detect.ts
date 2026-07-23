@@ -7,6 +7,7 @@
 import { chromium } from 'playwright';
 import { fetchActiveSites, updateSiteSelectors } from '../db/supabase.js';
 import { applyEsbuildNameShim, getBrowserLaunchOptions } from '../utils/browser.js';
+import { blockHeavyAssets } from '../utils/bandwidth.js';
 import { withMonitorParam } from '../utils/monitor-param.js';
 import { openQuoteFormIfNeeded } from './form-fill-helpers.js';
 import type { SiteRow } from '../types.js';
@@ -101,6 +102,7 @@ export async function detectFormFieldsForSite(site: SiteRow): Promise<DetectionR
   const browser = await chromium.launch(getBrowserLaunchOptions());
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   await applyEsbuildNameShim(page);
+  await blockHeavyAssets(page);
 
   try {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });

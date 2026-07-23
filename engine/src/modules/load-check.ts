@@ -5,7 +5,7 @@
  */
 
 import { devices, chromium, webkit, type Browser, type Page } from 'playwright';
-import { getAbortAfterConsecutiveRateLimits, getEnv, loadConfig } from '../config.js';
+import { getAbortAfterConsecutiveRateLimits, getDeploymentMode, getEnv, loadConfig } from '../config.js';
 import {
   closeIncident,
   countRecentSlowChecks,
@@ -14,6 +14,7 @@ import {
 } from '../db/supabase.js';
 import type { DeviceProfile, GeoGuardResult, LoadCheckResult, SiteRow } from '../types.js';
 import { applyEsbuildNameShim, getBrowserLaunchOptions } from '../utils/browser.js';
+import { blockHeavyAssets } from '../utils/bandwidth.js';
 import { withMonitorParam } from '../utils/monitor-param.js';
 import {
   markProxyBlocked,
@@ -26,6 +27,21 @@ import { classifyCheckOutcome } from '../utils/outcomes.js';
 import { captureCheckScreenshot } from '../utils/screenshots.js';
 import { gotoWithRetries, sleep } from '../utils/navigate.js';
 import { maybeSendAlert } from '../alerts/email.js';
+
+/** 30-minute Eastern slots: desktop → Safari (webkit) → mobile → repeat. */
+export function rotatingLoadProfile(now = new Date()): DeviceProfile {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(now);
+  const hourRaw = parts.find((p) => p.type === 'hour')!.value;
+  const minute = Number(parts.find((p) => p.type === 'minute')!.value);
+  const hour = Number(hourRaw === '24' ? '0' : hourRaw);
+  const slot = Math.floor((hour * 60 + minute) / 30) % 3;
+  return (['desktop', 'webkit', 'mobile'] as const)[slot];
+}
 
 const DEFAULT_SELECTORS: Record<string, string> = {
   logo: 'img[alt*="logo" i], a[href="/"] img, header img, .logo img, [class*="logo"] img',
@@ -245,6 +261,7 @@ async function runLoadAttempt(
   try {
     const context = await browser.newContext(contextOptions);
     await applyEsbuildNameShim(context);
+    await blockHeavyAssets(context);
     if (proxy) {
       const egress = await verifyProxyEgress(context);
       country = egress.country;
@@ -252,6 +269,30 @@ async function runLoadAttempt(
       console.log(
         `  fallback ${proxy.label}: ${egress.country || 'unknown country'} / ${egress.ip || 'unknown IP'}`
       );
+      const config = loadConfig();
+      const egressOk =
+        (egress.country || '').toUpperCase() === config.requiredCountry.toUpperCase() &&
+        Boolean(egress.ip);
+      // In production, avoid burning a full page download when egress is already wrong.
+      if (getDeploymentMode() === 'production' && !egressOk) {
+        notes =
+          'Proxy egress was not verified in the required country; skipped page load to limit bandwidth.';
+        await context.close();
+        return {
+          statusCode: null,
+          loaded: false,
+          loadMs: null,
+          lcpMs: null,
+          cls: null,
+          elementsOk: {},
+          screenshotPath: null,
+          notes,
+          consoleErrors: [],
+          failedRequests: [],
+          country,
+          ip,
+        };
+      }
     }
 
     const page = await context.newPage();
@@ -373,15 +414,15 @@ export async function runLoadCheckForSiteProfile(
     }
   }
 
-  // If the preferred proxy path was blocked, try one alternate proxy once.
-  // Do not retry via GitHub direct while the pool is in use.
-  if (attempt.statusCode === 429 || (selectedProxy && !egressVerified)) {
+  // Retry once via alternate proxy only on HTTP 429 — not on egress-verify
+  // failures (those already burned a full page load; flipping proxies doubles bandwidth).
+  if (attempt.statusCode === 429) {
     if (selectedProxy) {
       const alternate = await selectAlternateProxy(site.id, selectedProxy.id);
       const proxyNote = attempt.notes || `Attempt 1 ${selectedProxy.label} was blocked.`;
       if (alternate) {
         console.log(
-          `  proxy attempt was blocked; retrying once via alternate ${alternate.label}`
+          `  proxy attempt was rate-limited; retrying once via alternate ${alternate.label}`
         );
         try {
           selectedProxy = alternate;
@@ -423,6 +464,10 @@ export async function runLoadCheckForSiteProfile(
           'Skipped GitHub direct egress while the paid proxy pool is enabled.';
       }
     }
+  } else if (selectedProxy && !egressVerified) {
+    attempt.notes =
+      `${attempt.notes || ''} ` +
+      'Skipped alternate-proxy full reload after egress verify failure to limit bandwidth.';
   }
 
   const {
@@ -607,7 +652,9 @@ export async function runAllLoadChecks(opts: {
   geo: GeoGuardResult;
   oneSite?: boolean;
   oneProfile?: boolean;
+  allProfiles?: boolean;
   siteId?: string | null;
+  profile?: DeviceProfile | null;
 }): Promise<number> {
   const { fetchActiveSites } = await import('../db/supabase.js');
   const sites = await fetchActiveSites({ oneSite: opts.oneSite, siteId: opts.siteId });
@@ -616,12 +663,16 @@ export async function runAllLoadChecks(opts: {
     return 0;
   }
 
-  const profiles: DeviceProfile[] = opts.oneProfile
-    ? ['desktop']
-    : ['desktop', 'webkit', 'mobile'];
+  const profiles: DeviceProfile[] = opts.allProfiles
+    ? ['desktop', 'webkit', 'mobile']
+    : opts.profile
+      ? [opts.profile]
+      : opts.oneProfile
+        ? ['desktop']
+        : [rotatingLoadProfile()];
 
   console.log(
-    `Load checks: ${sites.length} site(s) × ${profiles.length} profile(s). production=${opts.geo.isProduction}`
+    `Load checks: ${sites.length} site(s) × ${profiles.length} profile(s) [${profiles.join(', ')}]. production=${opts.geo.isProduction}`
   );
 
   const cfg = loadConfig();

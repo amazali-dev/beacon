@@ -8,7 +8,6 @@ import { supabase } from '../lib/supabase';
 import {
   detectionStatusLabel,
   formTestPassed,
-  formTestSummary,
   formatRunLocation,
   healthFromChecks,
   healthLabel,
@@ -17,6 +16,18 @@ import {
   incidentTypeLabel,
   profileLabel,
 } from '../lib/labelMappers';
+import {
+  brandFromRunId,
+  egressFooterText,
+  formCardTone,
+  formDetectionStatus,
+  formFieldsStatus,
+  formRunLocationParts,
+  formSummaryBadges,
+  loadCheckDisplay,
+  parseFormNoteMeta,
+  splitFormNoteSteps,
+} from '../lib/siteDashboard';
 import { isRateLimitedFormTest } from '../lib/healthScoring';
 import { formatPakistanTime, formatRelativeTime, sinceDays, TIME_LABEL } from '../lib/time';
 import type { FormTest, Incident, LoadCheck, Site } from '../lib/types';
@@ -67,17 +78,6 @@ async function fetchSiteForms(siteId: string, since: string): Promise<FormTest[]
   }
 }
 
-function loadCheckResultLabel(c: LoadCheck, slowThresholdMs: number): string {
-  if (c.status_code === 429) {
-    return `Rate limited (HTTP ${c.status_code})`;
-  }
-  if (!c.loaded || (c.status_code ?? 0) >= 400) {
-    return `Failed (${c.status_code ?? 'no status'})`;
-  }
-  const slow = (c.load_ms ?? 0) > slowThresholdMs;
-  return slow ? `Slow · ${c.load_ms}ms` : `OK · ${c.load_ms ?? '?'}ms`;
-}
-
 function loadCheckBadge(c: LoadCheck, slowThresholdMs: number): 'ok' | 'bad' | 'muted' {
   if (c.status_code === 429) return 'muted';
   if (!c.loaded || (c.status_code ?? 0) >= 400) return 'bad';
@@ -85,6 +85,32 @@ function loadCheckBadge(c: LoadCheck, slowThresholdMs: number): 'ok' | 'bad' | '
     return 'muted';
   }
   return 'ok';
+}
+
+function ProfileIcon({ profile }: { profile: string }) {
+  const common = { viewBox: '0 0 16 16', width: 14, height: 14, 'aria-hidden': true as const };
+  if (profile === 'mobile') {
+    return (
+      <svg {...common}>
+        <rect x="4" y="1.5" width="8" height="13" rx="1.4" fill="none" stroke="currentColor" strokeWidth="1.3" />
+        <path d="M7 12.5h2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (profile === 'webkit') {
+    return (
+      <svg {...common}>
+        <rect x="1.5" y="3" width="13" height="10" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
+        <path d="M1.5 5.5h13" stroke="currentColor" strokeWidth="1.3" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...common}>
+      <rect x="1.5" y="2.5" width="13" height="9" rx="1.2" fill="none" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M5 13.5h6M8 11.5v2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  );
 }
 
 export function SiteDetail() {
@@ -107,6 +133,7 @@ export function SiteDetail() {
   const [visitFilter, setVisitFilter] = useState<'all' | 'ok' | 'fail' | 'slow'>('all');
   const [visitRateLimitedOnly, setVisitRateLimitedOnly] = useState(false);
   const [showClosedIncidents, setShowClosedIncidents] = useState(false);
+  const [expandedFormIds, setExpandedFormIds] = useState<Record<string, boolean>>({});
   const [modal, setModal] = useState<{ src: string; alt: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -165,7 +192,6 @@ export function SiteDetail() {
 
   const latestChecksByProfile = useMemo(() => {
     const latest = new Map<string, LoadCheck>();
-    // Checks arrive newest first. Preserve the first row for each profile.
     for (const check of checks) {
       if (!latest.has(check.profile)) latest.set(check.profile, check);
     }
@@ -173,8 +199,7 @@ export function SiteDetail() {
   }, [checks]);
 
   const chartChecks = useMemo(() => {
-    const since =
-      chartRange === '24h' ? sinceDays(1) : sinceDays(7);
+    const since = chartRange === '24h' ? sinceDays(1) : sinceDays(7);
     return checks
       .filter((c) => c.checked_at >= since)
       .sort((a, b) => a.checked_at.localeCompare(b.checked_at));
@@ -205,6 +230,13 @@ export function SiteDetail() {
     });
   }, [checks, visitProfile, visitFilter, visitRateLimitedOnly, slowThresholdMs]);
 
+  const fieldsStatus = site ? formFieldsStatus(site) : null;
+  const detectionTile = site ? formDetectionStatus(site) : null;
+  const formBadges = latestForm ? formSummaryBadges(latestForm) : [];
+  const formSteps = latestForm ? splitFormNoteSteps(latestForm.notes) : [];
+  const formNoteMeta = latestForm ? parseFormNoteMeta(latestForm.notes) : { fallback: null, http: null };
+  const egressSource = latestChecksByProfile[0] ?? latestForm ?? null;
+
   function setTab(id: string) {
     setParams({ tab: id });
   }
@@ -227,102 +259,272 @@ export function SiteDetail() {
   }
 
   return (
-    <div>
-      <div className="page-head site-head">
-        <div>
-          <Link className="subtle-link" to="/">
-            ← Dashboard
-          </Link>
-          <h1>{site.name}</h1>
-          <p>
-            <a href={site.main_url} target="_blank" rel="noreferrer">
-              {site.main_url}
-            </a>
-          </p>
-          <p className="meta">
+    <div className="site-detail-page">
+      <Link className="subtle-link site-back" to="/">
+        <ChevronLeftIcon />
+        Back to Dashboard
+      </Link>
+
+      <header className="site-hero">
+        <div className="site-hero-main">
+          <div>
+            <h1>{site.name}</h1>
+            <p className="site-hero-url">
+              <a href={site.main_url} target="_blank" rel="noreferrer">
+                {site.main_url}
+                <ExternalIcon />
+              </a>
+            </p>
+          </div>
+          <div className={`health-pill health-${health}`}>
+            <span className={`dot ${health}`} />
+            {healthLabel(health)}
+          </div>
+        </div>
+        <div className="site-hero-meta">
+          <span>
             {dataAsOf
               ? `Production data as of ${formatPakistanTime(dataAsOf)} ${TIME_LABEL}`
               : 'Loading current production data'}
-            {' · '}
-            <button type="button" onClick={() => setRefreshKey((key) => key + 1)}>
-              Refresh
-            </button>
-          </p>
+          </span>
+          <button
+            type="button"
+            className="site-refresh"
+            onClick={() => setRefreshKey((key) => key + 1)}
+          >
+            <RefreshIcon />
+            Refresh
+          </button>
         </div>
-        <div className={`health-pill health-${health}`}>
-          <span className={`dot ${health}`} />
-          {healthLabel(health)}
-        </div>
-      </div>
+      </header>
 
       <TabBar tabs={TABS} active={tab} onChange={setTab} />
 
       {tab === 'overview' && (
-        <div className="detail-grid">
-          <section className="detail-panel">
-            <h2>Current status</h2>
-            <ul className="reason-list">
+        <div className="site-dashboard">
+          <section className="sd-status-card">
+            <div className="sd-section-head">
+              <h2>Current status</h2>
+            </div>
+            <ul className="sd-reason-list">
               {reasons.map((r) => (
-                <li key={r}>{r}</li>
+                <li key={r}>
+                  <span className={`sd-reason-mark ${r === 'All profiles healthy' ? 'ok' : 'warn'}`} />
+                  {r}
+                </li>
               ))}
             </ul>
-            <p className="meta">
+            <div className="sd-status-tiles">
+              <div className="sd-status-tile">
+                <span className="sd-tile-label">Monitoring</span>
+                <strong className={site.active ? 'tone-ok' : 'tone-muted'}>
+                  {site.active ? 'Active' : 'Paused'}
+                </strong>
+              </div>
+              <div className="sd-status-tile">
+                <span className="sd-tile-label">Form test fields</span>
+                <strong className={`tone-${fieldsStatus?.tone}`}>{fieldsStatus?.label}</strong>
+              </div>
+              <div className="sd-status-tile">
+                <span className="sd-tile-label">Form detection</span>
+                <strong className={`tone-${detectionTile?.tone}`}>{detectionTile?.label}</strong>
+              </div>
+              <div className="sd-status-tile">
+                <span className="sd-tile-label">Open incidents</span>
+                <strong className={openIncidents.length ? 'tone-bad' : 'tone-ok'}>
+                  {openIncidents.length}
+                </strong>
+              </div>
+            </div>
+            <p className="sd-status-meta">
               {site.active ? 'Monitoring active' : 'Site paused'} · {detectionStatusLabel(site)}
             </p>
           </section>
 
-          <section className="detail-panel">
-            <h2>Latest load checks</h2>
-            {checks.length === 0 ? (
-              <p className="empty">No load checks yet.</p>
-            ) : (
-              <ul className="metric-list">
-                {latestChecksByProfile.map((c) => (
-                  <li key={c.id} className="metric-with-shot">
-                    <div>
-                      <strong>{profileLabel(c.profile)}</strong>
-                      <span>{c.load_ms ?? '—'}ms</span>
-                      <span className="meta">{formatRelativeTime(c.checked_at)}</span>
-                      <span className="meta run-location">{formatRunLocation(c)}</span>
-                    </div>
-                    <ScreenshotThumb
-                      src={c.screenshot_path}
-                      alt={`${profileLabel(c.profile)} load check`}
-                      onOpen={(src) => openShot(src, `${profileLabel(c.profile)} load check`)}
-                    />
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+          <div className="sd-main-grid">
+            <section className="sd-panel">
+              <div className="sd-section-head">
+                <h2>Latest load checks</h2>
+              </div>
+              {checks.length === 0 ? (
+                <p className="empty">No load checks yet.</p>
+              ) : (
+                <div className="sd-load-list">
+                  {latestChecksByProfile.map((c) => {
+                    const display = loadCheckDisplay(c, slowThresholdMs);
+                    const title = `${profileLabel(c.profile)} load check`;
+                    return (
+                      <article key={c.id} className="sd-load-card">
+                        <div className="sd-load-top">
+                          <div className="sd-load-identity">
+                            <span className="sd-load-icon">
+                              <ProfileIcon profile={c.profile} />
+                            </span>
+                            <div>
+                              <strong>{profileLabel(c.profile)}</strong>
+                              <span className="meta">{formatRelativeTime(c.checked_at)}</span>
+                            </div>
+                          </div>
+                          <ScreenshotThumb
+                            src={c.screenshot_path}
+                            alt={title}
+                            onOpen={(src) => openShot(src, title)}
+                          />
+                        </div>
+                        <div className="sd-load-metric">
+                          <div className="sd-load-metric-row">
+                            <span className={`sd-load-ms tone-${display.tone}`}>{display.seconds}</span>
+                            <span className={`sd-chip tone-${display.tone}`}>{display.label}</span>
+                          </div>
+                          <div className="sd-load-bar" aria-hidden="true">
+                            <span
+                              className={`sd-load-bar-fill tone-${display.tone}`}
+                              style={{ width: `${display.barPct}%` }}
+                            />
+                          </div>
+                          <span className="sd-load-threshold">
+                            Threshold: {slowThresholdMs}ms
+                            {c.load_ms != null ? ` · ${c.load_ms}ms` : ''}
+                          </span>
+                        </div>
+                        <p className="sd-load-location">{formatRunLocation(c)}</p>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
 
-          <section className="detail-panel">
-            <h2>Latest form test</h2>
-            {!latestForm ? (
-              <p className="empty">No form tests yet.</p>
-            ) : (
-              <>
-                <p>{formTestSummary(latestForm)}</p>
-                <p className="meta">
-                  {formatRelativeTime(latestForm.tested_at)} · {latestForm.run_id}
-                </p>
-                <p className="run-location">Accessed from: {formatRunLocation(latestForm)}</p>
-                {latestForm.notes && <p className="notes-block">{latestForm.notes}</p>}
-                <ScreenshotEvidence
-                  paths={collectScreenshotPaths(
-                    latestForm.attempt_screenshot_paths,
-                    latestForm.screenshot_path
+            <section className="sd-panel sd-form-panel">
+              <div className="sd-section-head">
+                <h2>Latest form test</h2>
+              </div>
+              {!latestForm ? (
+                <p className="empty">No form tests yet.</p>
+              ) : (
+                <>
+                  <div className="sd-form-badges">
+                    {formBadges.map((b) => (
+                      <span key={b.label} className={`sd-chip tone-${b.tone}`}>
+                        {b.label}
+                      </span>
+                    ))}
+                  </div>
+
+                  <div className="sd-form-meta">
+                    <div>
+                      <span>Time</span>
+                      <strong>{formatRelativeTime(latestForm.tested_at)}</strong>
+                    </div>
+                    <div>
+                      <span>Run ID</span>
+                      <strong>
+                        <code>{latestForm.run_id}</code>
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Brand</span>
+                      <strong>{brandFromRunId(latestForm.run_id)}</strong>
+                    </div>
+                    <div>
+                      <span>Fallback</span>
+                      <strong>
+                        {formNoteMeta.fallback ? `#${formNoteMeta.fallback} (sticky)` : '—'}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>HTTP</span>
+                      <strong>{formNoteMeta.http ?? '—'}</strong>
+                    </div>
+                    <div>
+                      <span>Proxy</span>
+                      <strong>
+                        {latestForm.proxy_used
+                          ? 'egress'
+                          : latestForm.is_production
+                            ? 'GitHub Actions'
+                            : 'local'}
+                      </strong>
+                    </div>
+                  </div>
+
+                  <div className="sd-form-layers">
+                    <span
+                      className={`sd-layer-tag ${
+                        latestForm.layer3_pass === true
+                          ? 'is-on'
+                          : latestForm.layer3_pass === false
+                            ? 'is-bad'
+                            : 'is-off'
+                      }`}
+                      title="CRM / HubSpot layer"
+                    >
+                      HubSpot
+                    </span>
+                    <span
+                      className={`sd-layer-tag ${
+                        latestForm.layer2_pass === true
+                          ? 'is-on'
+                          : latestForm.layer2_pass === false
+                            ? 'is-bad'
+                            : 'is-off'
+                      }`}
+                      title="Lead email layer"
+                    >
+                      Email
+                    </span>
+                  </div>
+
+                  <p className="sd-load-location">Accessed from: {formatRunLocation(latestForm)}</p>
+
+                  {formSteps.length > 0 && (
+                    <div className="sd-attempt-steps">
+                      <span className="sd-attempt-label">Attempt steps</span>
+                      <ul>
+                        {formSteps.map((step, index) => {
+                          const skipped = /skip|not connected|not found/i.test(step);
+                          const failed = /fail|error|timeout|could not/i.test(step);
+                          return (
+                            <li
+                              key={`${index}-${step.slice(0, 48)}`}
+                              className={failed ? 'is-bad' : skipped ? 'is-skip' : 'is-ok'}
+                            >
+                              <span className="sd-attempt-mark" aria-hidden="true">
+                                {failed ? '!' : skipped ? '–' : '✓'}
+                              </span>
+                              <span className="sd-attempt-text">{step}</span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
                   )}
-                  altBase={`Form test ${latestForm.run_id}`}
-                  onOpen={(src, alt) => openShot(src, alt)}
-                />
-              </>
-            )}
-          </section>
+
+                  {latestForm.notes && formSteps.length === 0 && (
+                    <p className="notes-block">{latestForm.notes}</p>
+                  )}
+
+                  <div className="sd-evidence">
+                    <span className="sd-attempt-label">Evidence</span>
+                    <ScreenshotEvidence
+                      paths={collectScreenshotPaths(
+                        latestForm.attempt_screenshot_paths,
+                        latestForm.screenshot_path
+                      )}
+                      altBase={`Form test ${latestForm.run_id}`}
+                      onOpen={(src, alt) => openShot(src, alt)}
+                    />
+                  </div>
+                </>
+              )}
+            </section>
+          </div>
 
           {openIncidents.length > 0 && (
-            <section className="detail-panel alert-panel">
-              <h2>Open incidents ({openIncidents.length})</h2>
+            <section className="sd-panel sd-incidents-panel">
+              <div className="sd-section-head">
+                <h2>Open incidents ({openIncidents.length})</h2>
+              </div>
               {openIncidents.map((i) => (
                 <article key={i.id} className="mini-incident">
                   <strong>{incidentTypeLabel(i.type)}</strong>
@@ -330,6 +532,10 @@ export function SiteDetail() {
                 </article>
               ))}
             </section>
+          )}
+
+          {egressFooterText(egressSource) && (
+            <p className="sd-egress-footer">{egressFooterText(egressSource)}</p>
           )}
         </div>
       )}
@@ -339,183 +545,266 @@ export function SiteDetail() {
       )}
 
       {tab === 'visits' && (
-        <div>
+        <div className="site-visits">
           <p className="section-hint">
             Every website load check (Desktop, Safari, Mobile) with screenshot Preview when captured.
           </p>
-          <div className="filter-bar">
-            <label>
-              Browser
-              <select
-                value={visitProfile}
-                onChange={(e) => setVisitProfile(e.target.value)}
-              >
-                <option value="all">All</option>
-                <option value="desktop">Desktop</option>
-                <option value="webkit">Safari</option>
-                <option value="mobile">Mobile</option>
-              </select>
-            </label>
-            <label>
-              Result
-              <select
-                value={visitFilter}
-                onChange={(e) =>
-                  setVisitFilter(e.target.value as 'all' | 'ok' | 'fail' | 'slow')
-                }
-              >
-                <option value="all">All</option>
-                <option value="ok">Healthy</option>
-                <option value="slow">Slow</option>
-                <option value="fail">Failed</option>
-              </select>
-            </label>
-            <label className="filter-checkbox">
-              <input
-                type="checkbox"
-                checked={visitRateLimitedOnly}
-                onChange={(e) => {
-                  setVisitRateLimitedOnly(e.target.checked);
-                  if (e.target.checked) setVisitFilter('all');
-                }}
-              />
-              Rate limited only
-            </label>
+          <div className="sv-toolbar">
+            <div className="filter-bar sv-filters">
+              <label>
+                Browser
+                <select
+                  value={visitProfile}
+                  onChange={(e) => setVisitProfile(e.target.value)}
+                >
+                  <option value="all">All</option>
+                  <option value="desktop">Desktop</option>
+                  <option value="webkit">Safari</option>
+                  <option value="mobile">Mobile</option>
+                </select>
+              </label>
+              <label>
+                Result
+                <select
+                  value={visitFilter}
+                  onChange={(e) =>
+                    setVisitFilter(e.target.value as 'all' | 'ok' | 'fail' | 'slow')
+                  }
+                >
+                  <option value="all">All</option>
+                  <option value="ok">Healthy</option>
+                  <option value="slow">Slow</option>
+                  <option value="fail">Failed</option>
+                </select>
+              </label>
+              <label className="filter-checkbox">
+                <input
+                  type="checkbox"
+                  checked={visitRateLimitedOnly}
+                  onChange={(e) => {
+                    setVisitRateLimitedOnly(e.target.checked);
+                    if (e.target.checked) setVisitFilter('all');
+                  }}
+                />
+                Rate limited only
+              </label>
+            </div>
+            <span className="sv-count">{filteredVisits.length} visits</span>
           </div>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>When</th>
-                  <th>Browser</th>
-                  <th>Accessed from</th>
-                  <th>Result</th>
-                  <th>Notes</th>
-                  <th>Screenshot</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredVisits.map((c) => {
-                  const title = `${profileLabel(c.profile)} · ${formatPakistanTime(c.checked_at)}`;
-                  return (
-                    <tr key={c.id}>
-                      <td>
-                        {formatRelativeTime(c.checked_at)}
-                        <div className="meta">
-                          {formatPakistanTime(c.checked_at)} {TIME_LABEL}
-                        </div>
-                      </td>
-                      <td>{profileLabel(c.profile)}</td>
-                      <td className="notes-cell">{formatRunLocation(c)}</td>
-                      <td>
-                        <span className={`badge ${loadCheckBadge(c, slowThresholdMs)}`}>
-                          {loadCheckResultLabel(c, slowThresholdMs)}
-                        </span>
-                      </td>
-                      <td className="notes-cell">{c.notes || '—'}</td>
-                      <td>
+
+          {filteredVisits.length === 0 ? (
+            <p className="empty">No load checks match.</p>
+          ) : (
+            <div className="sv-list">
+              {filteredVisits.map((c) => {
+                const display = loadCheckDisplay(c, slowThresholdMs);
+                const title = `${profileLabel(c.profile)} · ${formatPakistanTime(c.checked_at)}`;
+                const notes = (c.notes || '').replace(/\s+/g, ' ').trim();
+                return (
+                  <article key={c.id} className={`sv-card tone-${display.tone}`}>
+                    <div className="sv-when">
+                      <strong>{formatRelativeTime(c.checked_at)}</strong>
+                      <span>
+                        {formatPakistanTime(c.checked_at)} {TIME_LABEL}
+                      </span>
+                      <span className="sv-browser">
+                        <ProfileIcon profile={c.profile} />
+                        {profileLabel(c.profile)}
+                      </span>
+                    </div>
+
+                    <div className="sv-body">
+                      <p className="sv-location">
+                        <GlobeIcon />
+                        <span>{formatRunLocation(c)}</span>
+                      </p>
+                      <div className="sv-result-row">
+                        <span className={`sd-chip tone-${display.tone}`}>{display.chip}</span>
+                        {(display.tone === 'ok' || display.tone === 'warn') && c.load_ms != null && (
+                          <div className="sv-mini-bar" aria-hidden="true">
+                            <span
+                              className={`sd-load-bar-fill tone-${display.tone}`}
+                              style={{ width: `${display.barPct}%` }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                      <p className="sv-notes">{notes || '—'}</p>
+                    </div>
+
+                    <div className="sv-preview">
+                      {c.screenshot_path ? (
                         <ScreenshotThumb
+                          className="sv-shot"
                           src={c.screenshot_path}
                           alt={title}
                           onOpen={(src) => openShot(src, title)}
                         />
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          {filteredVisits.length === 0 && <p className="empty">No load checks match.</p>}
+                      ) : (
+                        <div className="sv-shot-empty">
+                          <span className="shot-thumb-frame is-empty">No shot</span>
+                          <span>Preview</span>
+                        </div>
+                      )}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
       {tab === 'forms' && (
-        <div>
-          <div className="filter-bar">
-            <label>
-              Search
-              <input
-                value={formQuery}
-                onChange={(e) => setFormQuery(e.target.value)}
-                placeholder="Run ID or notes…"
-              />
-            </label>
-            <label>
-              Result
-              <select
-                value={formFilter}
-                onChange={(e) => setFormFilter(e.target.value as 'all' | 'pass' | 'fail')}
-              >
-                <option value="all">All</option>
-                <option value="pass">Passed</option>
-                <option value="fail">Failed</option>
-              </select>
-            </label>
-            <label className="filter-checkbox">
-              <input
-                type="checkbox"
-                checked={formRateLimitedOnly}
-                onChange={(e) => {
-                  setFormRateLimitedOnly(e.target.checked);
-                  if (e.target.checked) setFormFilter('all');
-                }}
-              />
-              Rate limited only
-            </label>
+        <div className="site-forms">
+          <div className="sv-toolbar">
+            <div className="filter-bar sv-filters">
+              <label>
+                Search
+                <input
+                  value={formQuery}
+                  onChange={(e) => setFormQuery(e.target.value)}
+                  placeholder="Run ID or notes…"
+                />
+              </label>
+              <label>
+                Result
+                <select
+                  value={formFilter}
+                  onChange={(e) => setFormFilter(e.target.value as 'all' | 'pass' | 'fail')}
+                >
+                  <option value="all">All</option>
+                  <option value="pass">Passed</option>
+                  <option value="fail">Failed</option>
+                </select>
+              </label>
+              <label className="filter-checkbox">
+                <input
+                  type="checkbox"
+                  checked={formRateLimitedOnly}
+                  onChange={(e) => {
+                    setFormRateLimitedOnly(e.target.checked);
+                    if (e.target.checked) setFormFilter('all');
+                  }}
+                />
+                Rate limited only
+              </label>
+            </div>
+            <span className="sv-count">{filteredForms.length} tests</span>
           </div>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>When</th>
-                  <th>Run ID</th>
-                  <th>Accessed from</th>
-                  <th>Result</th>
-                  <th>Notes</th>
-                  <th>Screenshot</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredForms.map((f) => (
-                  <tr key={f.id}>
-                    <td>
-                      {formatRelativeTime(f.tested_at)}
-                      <div className="meta">{formatPakistanTime(f.tested_at)} {TIME_LABEL}</div>
-                    </td>
-                    <td>
-                      <code>{f.run_id}</code>
-                    </td>
-                    <td className="notes-cell">{formatRunLocation(f)}</td>
-                    <td>
-                      <span
-                        className={`badge ${
-                          isRateLimitedFormTest(f) || f.outcome === 'monitor_error'
-                            ? 'muted'
-                            : formTestPassed(f)
-                              ? 'ok'
-                              : f.outcome === 'site_failure' || f.layer1_pass === false
-                                ? 'bad'
-                                : 'muted'
-                        }`}
-                      >
-                        {formTestSummary(f)}
-                      </span>
-                    </td>
-                    <td className="notes-cell">{f.notes || '—'}</td>
-                    <td>
-                      <ScreenshotEvidence
-                        paths={collectScreenshotPaths(f.attempt_screenshot_paths, f.screenshot_path)}
-                        altBase={f.run_id}
-                        onOpen={(src, alt) => openShot(src, alt)}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {filteredForms.length === 0 && <p className="empty">No form tests match.</p>}
+
+          {filteredForms.length === 0 ? (
+            <p className="empty">No form tests match.</p>
+          ) : (
+            <div className="sf-list">
+              {filteredForms.map((f) => {
+                const tone = formCardTone(f);
+                const badges = formSummaryBadges(f);
+                const steps = splitFormNoteSteps(f.notes);
+                const { location, proxy } = formRunLocationParts(f);
+                const paths = collectScreenshotPaths(f.attempt_screenshot_paths, f.screenshot_path);
+                const expanded = Boolean(expandedFormIds[f.id]);
+                return (
+                  <article key={f.id} className={`sf-card tone-${tone}`}>
+                    <header className="sf-card-head">
+                      <div className="sf-when">
+                        <strong>{formatRelativeTime(f.tested_at)}</strong>
+                        <span>
+                          {formatPakistanTime(f.tested_at)} {TIME_LABEL}
+                        </span>
+                      </div>
+                      <div className="sf-badges">
+                        {badges.map((b) => (
+                          <span key={b.label} className={`sd-chip tone-${b.tone}`}>
+                            {b.label}
+                          </span>
+                        ))}
+                      </div>
+                    </header>
+
+                    <div className="sf-meta">
+                      <div>
+                        <span>Run ID</span>
+                        <strong>
+                          <code>{f.run_id}</code>
+                        </strong>
+                      </div>
+                      <div>
+                        <span>Location</span>
+                        <strong>{location}</strong>
+                      </div>
+                      <div>
+                        <span>Proxy</span>
+                        <strong>{proxy}</strong>
+                      </div>
+                    </div>
+
+                    <div className="sf-footer">
+                      {steps.length > 0 ? (
+                        <div className="sf-steps-block">
+                          <button
+                            type="button"
+                            className="sf-steps-toggle"
+                            onClick={() =>
+                              setExpandedFormIds((prev) => ({ ...prev, [f.id]: !prev[f.id] }))
+                            }
+                          >
+                            <span aria-hidden="true">{expanded ? '▾' : '▸'}</span>
+                            {expanded ? 'Hide' : 'Show'} attempt steps ({steps.length})
+                          </button>
+                          {expanded && (
+                            <ul className="sf-steps">
+                              {steps.map((step, index) => {
+                                const skipped = /skip|not connected|not found/i.test(step);
+                                const failed = /fail|error|timeout|could not/i.test(step);
+                                return (
+                                  <li
+                                    key={`${f.id}-${index}`}
+                                    className={failed ? 'is-bad' : skipped ? 'is-skip' : 'is-ok'}
+                                  >
+                                    <span className="sd-attempt-mark" aria-hidden="true">
+                                      {failed ? '!' : skipped ? '–' : '✓'}
+                                    </span>
+                                    <span className="sd-attempt-text">{step}</span>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="sf-notes">{(f.notes || '—').replace(/\s+/g, ' ').trim()}</p>
+                      )}
+
+                      <div className="sf-evidence">
+                        <span className="sd-attempt-label">Evidence</span>
+                        {paths.length === 0 ? (
+                          <span className="muted-text">No screenshots</span>
+                        ) : (
+                          <div className="sf-evidence-atts">
+                            {paths.map((path, index) => {
+                              const label = paths.length === 1 ? 'Preview' : `Att ${index + 1}`;
+                              const alt = `${f.run_id} — ${label}`;
+                              return (
+                                <ScreenshotThumb
+                                  key={`${path}-${index}`}
+                                  className="sv-shot sf-shot"
+                                  src={path}
+                                  label={label}
+                                  alt={alt}
+                                  onOpen={(src) => openShot(src, alt)}
+                                />
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -587,5 +876,71 @@ export function SiteDetail() {
         onClose={() => setModal(null)}
       />
     </div>
+  );
+}
+
+function ChevronLeftIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+      <path
+        d="M10 3.5 5.5 8 10 12.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function ExternalIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+      <path
+        d="M6 3.5H3.5v9h9V10M9 3.5h3.5V7M7 9l5.5-5.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function GlobeIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+      <circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.25" />
+      <path
+        d="M2.5 8h11M8 2.5c1.6 1.8 2.4 3.6 2.4 5.5S9.6 11.7 8 13.5C6.4 11.7 5.6 9.9 5.6 8S6.4 4.3 8 2.5Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.25"
+      />
+    </svg>
+  );
+}
+
+function RefreshIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+      <path
+        d="M13.2 8A5.2 5.2 0 1 1 11.4 3.4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+      <path
+        d="M11 1.8v2.8h2.8"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }

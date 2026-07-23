@@ -27,6 +27,7 @@ import { maybeSendAlert } from '../alerts/email.js';
 import { verifyInboxForRunId } from './imap-verify.js';
 import { verifyLeadInCrm } from '../hooks/crm-layer3.js';
 import { applyEsbuildNameShim, getBrowserLaunchOptions } from '../utils/browser.js';
+import { blockHeavyAssets } from '../utils/bandwidth.js';
 import { withMonitorParam } from '../utils/monitor-param.js';
 import {
   markProxyBlocked,
@@ -181,6 +182,7 @@ export async function runFormTestForSite(
       })
     : null;
   if (context) await applyEsbuildNameShim(context);
+  if (context) await blockHeavyAssets(context);
   if (selectedProxy && context) {
     proxyUsed = true;
     notes.push(`Attempt 1 uses ${selectedProxy.label} (sticky for this brand).`);
@@ -209,7 +211,10 @@ export async function runFormTestForSite(
         locale: 'en-US',
         timezoneId: 'America/New_York',
       });
-  if (!context) await applyEsbuildNameShim(page);
+  if (!context) {
+    await applyEsbuildNameShim(page);
+    await blockHeavyAssets(page);
+  }
   let submittedAt = Date.now();
 
   try {
@@ -225,11 +230,13 @@ export async function runFormTestForSite(
       (selectedProxy && !egressVerified) ||
       nav.rateLimited ||
       (await pageLooksRateLimited(page));
-    if (navigationBlocked && selectedProxy && (nav.rateLimited || (await pageLooksRateLimited(page)))) {
+    const rateLimitedNav = nav.rateLimited || (await pageLooksRateLimited(page));
+    if (navigationBlocked && selectedProxy && rateLimitedNav) {
       await markProxyBlocked(selectedProxy, 'HTTP 429 from target');
     }
 
-    if (navigationBlocked && selectedProxy) {
+    // Full alternate-proxy reload only on rate-limit — not on egress-verify misses.
+    if (rateLimitedNav && selectedProxy) {
       const alternate = await selectAlternateProxy(site.id, selectedProxy.id);
       if (alternate) {
         notes.push(
@@ -254,6 +261,7 @@ export async function runFormTestForSite(
           timezoneId: 'America/New_York',
         });
         await applyEsbuildNameShim(proxyContext);
+        await blockHeavyAssets(proxyContext);
         const egress = await verifyProxyEgress(proxyContext);
         checkCountry = egress.country;
         checkIp = egress.ip;
@@ -286,6 +294,10 @@ export async function runFormTestForSite(
           'No alternate proxy was available. Skipped GitHub direct egress while the paid proxy pool is enabled.'
         );
       }
+    } else if (selectedProxy && !egressVerified) {
+      notes.push(
+        'Skipped alternate-proxy full reload after egress verify failure to limit bandwidth.'
+      );
     }
 
     if (navigationBlocked) {
@@ -354,79 +366,24 @@ export async function runFormTestForSite(
           );
           if (firstShot) attemptScreenshotPaths.push(firstShot);
 
-          const refreshDelayMs = 15_000;
+          // Skip page.reload retry — a second full load through the proxy is expensive.
+          // Stay on the same page and use website URL fallback so the form can still submit.
+          const fallbackUrl = site.main_url || 'https://beacon.test';
           notes.push(
-            `Attempt 1 screenshot captured. Waiting ${refreshDelayMs / 1000} seconds, then refreshing the same browser session and IP.`
+            'Logo upload failed on attempt 1. Skipped same-IP page refresh retry to limit proxy bandwidth.'
           );
-          await page.waitForTimeout(refreshDelayMs);
-          await page.reload({ waitUntil: 'domcontentloaded', timeout: 45_000 });
-          const refreshedEgress = await verifyProxyEgress(page.context());
-          if (checkIp && refreshedEgress.ip && refreshedEgress.ip !== checkIp) {
-            monitorError = true;
-            throw new Error(
-              `Egress IP changed before logo retry (${checkIp} -> ${refreshedEgress.ip}); same-IP retry was not performed`
-            );
-          }
-          notes.push(
-            refreshedEgress.ip
-              ? `Attempt 2: page refreshed and same egress IP verified (${refreshedEgress.ip}).`
-              : `Attempt 2: page refreshed in the same browser session; egress re-verification was unavailable (${checkIp || 'original IP unknown'}).`
-          );
-          await page.waitForTimeout(2500);
-          await openQuoteFormIfNeeded(page);
-          await fillContactFields(page, identity, selectors, notes);
-          if (/name field fill failed|email field fill failed|phone field fill failed/i.test(notes.join(' '))) {
-            const fieldsShot = await captureFormScreenshot(
-              page,
-              `form_${site.name}_${runId}_logo_attempt_2_fields`,
-              'failure'
-            );
-            if (fieldsShot) attemptScreenshotPaths.push(fieldsShot);
-            throw new Error('Required contact fields were not filled after the logo-upload refresh');
-          }
-
-          fileInput = selectors.file
-            ? page.locator(selectors.file).first()
-            : page.locator('input[type="file"]').first();
-          const retryLogo = logoCandidates[1] || logoCandidates[0]!;
-          logoUploadOk =
-            (await fileInput.count()) > 0
-              ? await uploadLogoOnce(page, fileInput, retryLogo, 2, notes).catch(() => false)
-              : false;
-          const secondShot = await captureFormScreenshot(
-            page,
-            `form_${site.name}_${runId}_logo_attempt_2`,
-            logoUploadOk ? 'success' : 'failure'
-          );
-          if (secondShot) attemptScreenshotPaths.push(secondShot);
-
-          if (!logoUploadOk) {
-            const fallbackUrl = site.main_url || 'https://beacon.test';
+          if (await fillWebsiteOrBusinessFallback(page, fallbackUrl)) {
             notes.push(
-              'Logo recovery summary: Attempt 1 upload failed with a network error ' +
-                '(site/CDN/proxy path — not necessarily home Wi-Fi). ' +
-                'Refreshed the same browser session and IP, then retried with another logo. ' +
-                'Attempt 2 also failed.'
+              `Fallback used: filled "Website URL or business name" with ${fallbackUrl} ` +
+                'so the form can still submit without a logo file. Continuing to submit.'
             );
-            if (await fillWebsiteOrBusinessFallback(page, fallbackUrl)) {
-              notes.push(
-                `Fallback used: filled "Website URL or business name" with ${fallbackUrl} ` +
-                  'so the form can still submit without a logo file. Continuing to submit.'
-              );
-              // Re-apply contact fields in case a bad selector ever overwrote email/name.
-              await fillContactFields(page, identity, selectors, notes);
-            } else {
-              notes.push(
-                'Fallback failed: "Website URL or business name" field was not found or could not be filled.'
-              );
-              throw new Error(
-                'Required logo upload failed on both attempts, and website URL fallback could not be filled'
-              );
-            }
+            await fillContactFields(page, identity, selectors, notes);
           } else {
-            logoRecoveredAfterRefresh = true;
             notes.push(
-              'Logo recovery summary: Attempt 1 failed; after same-IP refresh, Attempt 2 logo upload succeeded. Continuing form submission.'
+              'Fallback failed: "Website URL or business name" field was not found or could not be filled.'
+            );
+            throw new Error(
+              'Required logo upload failed, and website URL fallback could not be filled'
             );
           }
         }

@@ -21,6 +21,7 @@ export type TimelineEvent = {
   detail: string;
   location: string | null;
   status: 'ok' | 'bad' | 'muted';
+  statusLabel: string;
   rateLimited: boolean;
   screenshot_path: string | null;
 };
@@ -54,6 +55,7 @@ function buildEvents(
       c.elements_ok?.cta === false ||
       c.elements_ok?.quote_form === false ||
       slow;
+    const status = bad ? 'bad' : warn ? 'muted' : 'ok';
     events.push({
       id: `load-${c.id}`,
       type: 'load',
@@ -63,13 +65,24 @@ function buildEvents(
         ? `Failed to load (${c.status_code ?? 'no status'})`
         : monitorError
           ? 'Monitor could not complete this visit'
-        : rateLimited
-          ? `Site rate-limited checker (HTTP ${c.status_code})`
-          : warn
-            ? `Loaded in ${c.load_ms ?? '?'}ms — check CTA/form or speed`
-            : `Loaded in ${c.load_ms ?? '?'}ms`,
+          : rateLimited
+            ? `Site rate-limited checker (HTTP ${c.status_code})`
+            : warn
+              ? `Loaded in ${c.load_ms ?? '?'}ms — check CTA/form or speed`
+              : `Loaded in ${c.load_ms ?? '?'}ms`,
       location: formatRunLocation(c),
-      status: bad ? 'bad' : warn ? 'muted' : 'ok',
+      status,
+      statusLabel: bad
+        ? 'Failed'
+        : rateLimited
+          ? 'Rate limited'
+          : slow
+            ? 'Slow'
+            : monitorError
+              ? 'Monitor error'
+              : warn
+                ? 'Needs attention'
+                : 'OK',
       rateLimited,
       screenshot_path: c.screenshot_path,
     });
@@ -80,14 +93,17 @@ function buildEvents(
     const failed =
       !rateLimited &&
       (f.outcome === 'site_failure' || f.layer1_pass === false || f.layer2_pass === false);
+    const summary = formTestSummary(f);
+    const notes = (f.notes || '').replace(/\s+/g, ' ').trim();
     events.push({
       id: `form-${f.id}`,
       type: 'form',
       timestamp: f.tested_at,
       title: `Form test · ${f.run_id}`,
-      detail: f.notes ? `${formTestSummary(f)} — ${f.notes}` : formTestSummary(f),
+      detail: notes ? `${summary} — ${notes}` : summary,
       location: formatRunLocation(f),
       status: failed ? 'bad' : f.layer1_pass === true ? 'ok' : 'muted',
+      statusLabel: failed ? 'Failed' : rateLimited ? 'Rate limited' : f.layer1_pass === true ? 'OK' : 'Incomplete',
       rateLimited,
       screenshot_path: f.screenshot_path,
     });
@@ -102,6 +118,7 @@ function buildEvents(
       detail: incidentDetailPlain(i),
       location: null,
       status: i.closed_at ? 'muted' : 'bad',
+      statusLabel: i.closed_at ? 'Closed' : 'Open',
       rateLimited: i.type === 'rate_limited',
       screenshot_path: i.screenshot_path,
     });
@@ -114,6 +131,7 @@ function buildEvents(
         detail: incidentDetailPlain(i),
         location: null,
         status: 'ok',
+        statusLabel: 'Resolved',
         rateLimited: i.type === 'rate_limited',
         screenshot_path: i.screenshot_path,
       });
@@ -121,6 +139,26 @@ function buildEvents(
   }
 
   return events.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+}
+
+function typeLabel(t: TimelineEventType): string {
+  if (t === 'load') return 'Load';
+  if (t === 'form') return 'Form';
+  return 'Incident';
+}
+
+function GlobeIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+      <circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.25" />
+      <path
+        d="M2.5 8h11M8 2.5c1.6 1.8 2.4 3.6 2.4 5.5S9.6 11.7 8 13.5C6.4 11.7 5.6 9.9 5.6 8S6.4 4.3 8 2.5Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.25"
+      />
+    </svg>
+  );
 }
 
 export function Timeline({
@@ -175,74 +213,89 @@ export function Timeline({
 
   return (
     <div className="timeline-wrap">
-      <div className="filter-bar">
-        <label>
-          Search
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Filter by keyword…"
-          />
-        </label>
-        <label>
-          Timeframe
-          <select value={timeframe} onChange={(e) => setTimeframe(e.target.value as Timeframe)}>
-            <option value="24h">Last 24h</option>
-            <option value="7d">Last 7 days</option>
-            <option value="30d">Last 30 days</option>
-            <option value="all">All time</option>
-          </select>
-        </label>
-        <div className="chip-group">
-          {(['load', 'form', 'incident'] as TimelineEventType[]).map((t) => (
-            <button
-              key={t}
-              type="button"
-              className={types.has(t) ? 'chip active' : 'chip'}
-              onClick={() => toggleType(t)}
-            >
-              {t === 'load' ? 'Load' : t === 'form' ? 'Forms' : 'Incidents'}
-            </button>
-          ))}
+      <div className="tl-toolbar">
+        <div className="filter-bar sv-filters tl-filters">
+          <label>
+            Search
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Filter by keyword…"
+            />
+          </label>
+          <label>
+            Timeframe
+            <select value={timeframe} onChange={(e) => setTimeframe(e.target.value as Timeframe)}>
+              <option value="24h">Last 24h</option>
+              <option value="7d">Last 7 days</option>
+              <option value="30d">Last 30 days</option>
+              <option value="all">All time</option>
+            </select>
+          </label>
+          <div className="tl-type-chips" role="group" aria-label="Event types">
+            {(['incident', 'load', 'form'] as TimelineEventType[]).map((t) => (
+              <button
+                key={t}
+                type="button"
+                className={`tl-type-chip type-${t} ${types.has(t) ? 'is-active' : ''}`}
+                onClick={() => toggleType(t)}
+              >
+                <span className="tl-type-dot" aria-hidden="true" />
+                {typeLabel(t)}
+              </button>
+            ))}
+          </div>
+          <label className="filter-checkbox">
+            <input
+              type="checkbox"
+              checked={rateLimitedOnly}
+              onChange={(event) => setRateLimitedOnly(event.target.checked)}
+            />
+            Rate limited only
+          </label>
         </div>
-        <label className="filter-checkbox">
-          <input
-            type="checkbox"
-            checked={rateLimitedOnly}
-            onChange={(event) => setRateLimitedOnly(event.target.checked)}
-          />
-          Rate limited only
-        </label>
+        <span className="sv-count">{filtered.length} events</span>
       </div>
 
       <ol className="timeline-list">
         {filtered.map((e) => (
           <li key={e.id} className={`timeline-item status-${e.status}`}>
-            <div className="timeline-marker" />
-            <div className="timeline-body">
-              <header>
-                <strong>{e.title}</strong>
-                <span className={`badge ${e.status === 'ok' ? 'ok' : e.status === 'bad' ? 'bad' : 'muted'}`}>
-                  {e.type}
-                </span>
+            <div className="timeline-marker" aria-hidden="true" />
+            <article className="timeline-card">
+              <header className="timeline-card-head">
+                <div className="timeline-card-title">
+                  <strong>{e.title}</strong>
+                  <span className={`tl-badge type-${e.type}`}>{typeLabel(e.type)}</span>
+                  <span className={`sd-chip tone-${e.status === 'ok' ? 'ok' : e.status === 'bad' ? 'bad' : 'muted'}`}>
+                    {e.statusLabel}
+                  </span>
+                </div>
               </header>
-              <p className="meta">
+              <p className="timeline-card-time">
                 {formatRelativeTime(e.timestamp)} · {formatPakistanTime(e.timestamp)} {TIME_LABEL}
               </p>
-              {e.location && <p className="run-location">Accessed from: {e.location}</p>}
-              <p>{e.detail}</p>
-              <ScreenshotThumb
-                src={e.screenshot_path}
-                alt={e.title}
-                onOpen={(src) => onOpenScreenshot(src, e.title)}
-              />
-            </div>
+              {e.location && (
+                <p className="timeline-card-location">
+                  <GlobeIcon />
+                  <span>{e.location}</span>
+                </p>
+              )}
+              <p className="timeline-card-detail">{e.detail}</p>
+              {e.screenshot_path ? (
+                <div className="timeline-card-shot">
+                  <ScreenshotThumb
+                    className="sv-shot"
+                    src={e.screenshot_path}
+                    alt={e.title}
+                    onOpen={(src) => onOpenScreenshot(src, e.title)}
+                  />
+                </div>
+              ) : null}
+            </article>
           </li>
         ))}
       </ol>
-      {filtered.length === 0 && (
-        <p className="empty">No events match your filters.</p>
-      )}
+      {filtered.length === 0 && <p className="empty">No events match your filters.</p>}
     </div>
   );
 }

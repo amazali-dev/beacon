@@ -1,17 +1,21 @@
-# Load + render checks — hourly on GitHub-hosted US runners.
-# Manual "Run workflow" is also available (for testing or the future Run Now button).
+# Load + render checks — every 30 minutes, one rotating profile
+# (desktop → Safari → mobile) to cut proxy bandwidth.
 
 name: Load checks
 
 # Triggers: GitHub schedule (often delayed) + manual Run workflow.
 on:
   schedule:
-    # Hourly to reduce CDN rate-limit pressure after prolonged 429 blocks.
-    - cron: "17 * * * *"
+    # Twice hourly: each run covers one device profile for the current 30m Eastern slot.
+    - cron: "17,47 * * * *"
   workflow_dispatch:
     inputs:
       complete_all_checks:
         description: Run every site/profile even after rate limits (one-off; scheduled runs still abort early)
+        type: boolean
+        default: false
+      all_profiles:
+        description: Run desktop + Safari + mobile in one job (bandwidth-heavy; default is one rotating profile)
         type: boolean
         default: false
 
@@ -101,4 +105,4 @@ jobs:
           PROXY_USERNAME: ${{ secrets.PROXY_USERNAME }}
           PROXY_PASSWORD: ${{ secrets.PROXY_PASSWORD }}
           ABORT_AFTER_CONSECUTIVE_RATE_LIMITS: ${{ github.event_name == 'workflow_dispatch' && inputs.complete_all_checks && '999' || '' }}
-        run: npm run check:once
+        run: npm run check:once -- ${{ github.event_name == 'workflow_dispatch' && inputs.all_profiles && '--all-profiles' || '' }}

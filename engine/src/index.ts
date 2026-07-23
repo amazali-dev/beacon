@@ -3,7 +3,8 @@
  *
  * Examples:
  *   npm run check:one     — one site, desktop only (Step 2)
- *   npm run check:once    — all sites × all profiles once
+ *   npm run check:once    — all sites × current rotating profile once
+ *   npm run check:once -- --all-profiles — all sites × desktop/Safari/mobile
  *   npm run form:one      — one site form test, headed browser
  *   npm run detect:forms  — auto-detect form field selectors
  *   npm run report:daily  — send daily report now
@@ -262,12 +263,14 @@ async function main(): Promise<void> {
   await bumpHeartbeat(geo);
   if (shouldSkipProductionWrite(geo)) return;
   const sites = await fetchActiveSites({ oneSite: hasFlag('--one-site') });
-  const profileCount = hasFlag('--one-profile') ? 1 : 3;
+  const allProfiles = hasFlag('--all-profiles');
+  const profileCount = allProfiles ? 3 : 1;
   await trackedRun('load_check', geo, sites.length * profileCount, () =>
     runAllLoadChecks({
       geo,
       oneSite: hasFlag('--one-site'),
       oneProfile: hasFlag('--one-profile'),
+      allProfiles,
     })
   );
 }

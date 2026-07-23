@@ -177,11 +177,6 @@ export function Layout() {
         </aside>
 
         <main className="main">
-          {import.meta.env.VITE_BEACON_ENV !== 'production' && (
-            <div className="staging-banner" role="status">
-              Local dashboard view — production checks run on GitHub Actions (US). Refresh after a workflow finishes to see new data.
-            </div>
-          )}
           <Outlet />
         </main>
       </div>

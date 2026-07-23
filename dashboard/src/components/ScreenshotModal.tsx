@@ -99,25 +99,80 @@ export function ScreenshotModal({ src, alt = 'Screenshot', onClose }: Props) {
 type ThumbProps = {
   src: string | null | undefined;
   alt?: string;
+  label?: string;
   onOpen: (src: string) => void;
+  className?: string;
 };
 
-export function ScreenshotThumb({ src, alt = 'Screenshot', onOpen }: ThumbProps) {
+export function ScreenshotThumb({
+  src,
+  alt = 'Screenshot',
+  label = 'Preview',
+  onOpen,
+  className,
+}: ThumbProps) {
   const [broken, setBroken] = useState(false);
   const resolvedSrc = useScreenshotUrl(src);
 
   useEffect(() => setBroken(false), [src]);
 
   if (!src) return <span className="muted-text">—</span>;
-  if (!resolvedSrc) return <span className="muted-text">Loading screenshot…</span>;
+  if (!resolvedSrc) {
+    return (
+      <button type="button" className={`shot-thumb ${className || ''}`.trim()} disabled title="Loading screenshot">
+        <span className="shot-thumb-frame is-loading">View</span>
+        <span>{label}</span>
+      </button>
+    );
+  }
   if (broken) {
     return <span className="muted-text">Screenshot unavailable</span>;
   }
 
   return (
-    <button type="button" className="shot-thumb" onClick={() => onOpen(resolvedSrc)} title="Preview screenshot">
-      <img src={resolvedSrc} alt={alt} onError={() => setBroken(true)} />
-      <span>Preview</span>
+    <button
+      type="button"
+      className={`shot-thumb ${className || ''}`.trim()}
+      onClick={() => onOpen(resolvedSrc)}
+      title="Preview screenshot"
+    >
+      <span className="shot-thumb-frame">
+        <img src={resolvedSrc} alt={alt} onError={() => setBroken(true)} />
+      </span>
+      <span>{label}</span>
+    </button>
+  );
+}
+
+type AttProps = {
+  src: string | null | undefined;
+  label: string;
+  alt?: string;
+  onOpen: (src: string) => void;
+};
+
+/** Compact evidence chip (View / Att N) for incident cards. */
+export function ScreenshotAttButton({ src, label, alt = 'Screenshot', onOpen }: AttProps) {
+  const resolvedSrc = useScreenshotUrl(src);
+
+  if (!src) return null;
+
+  return (
+    <button
+      type="button"
+      className="evidence-att"
+      disabled={!resolvedSrc}
+      title={alt}
+      onClick={() => {
+        if (resolvedSrc) onOpen(resolvedSrc);
+      }}
+    >
+      <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+        <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.25" />
+        <circle cx="5.5" cy="6" r="1.1" fill="currentColor" />
+        <path d="M2.5 12.5 6 9l2.2 2.2L11 8.5l2.5 4" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" />
+      </svg>
+      <span>{resolvedSrc ? label : '…'}</span>
     </button>
   );
 }

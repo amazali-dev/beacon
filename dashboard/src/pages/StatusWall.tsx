@@ -91,16 +91,98 @@ function effectiveHealth(summary: SiteSummary): Health {
   return summary.health;
 }
 
-function NextRunTimers({
+function FleetDonut({
+  healthy,
+  attention,
+  down,
+  total,
+}: {
+  healthy: number;
+  attention: number;
+  down: number;
+  total: number;
+}) {
+  const size = 118;
+  const stroke = 11;
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const safeTotal = Math.max(total, 1);
+  const segs = [
+    { n: healthy, color: 'var(--ok)' },
+    { n: attention, color: 'var(--warn)' },
+    { n: down, color: 'var(--bad)' },
+    { n: Math.max(0, total - healthy - attention - down), color: '#5a7078' },
+  ];
+
+  let offset = 0;
+  const arcs = segs
+    .filter((s) => s.n > 0)
+    .map((s) => {
+      const len = (s.n / safeTotal) * c;
+      const arc = { color: s.color, len, offset };
+      offset += len;
+      return arc;
+    });
+
+  return (
+    <div className="fleet-donut" aria-hidden>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          fill="none"
+          stroke="rgba(255,255,255,0.06)"
+          strokeWidth={stroke}
+        />
+        {arcs.map((arc) => (
+          <circle
+            key={`${arc.color}-${arc.offset}`}
+            cx={size / 2}
+            cy={size / 2}
+            r={r}
+            fill="none"
+            stroke={arc.color}
+            strokeWidth={stroke}
+            strokeLinecap="butt"
+            strokeDasharray={`${arc.len} ${c - arc.len}`}
+            strokeDashoffset={-arc.offset}
+            transform={`rotate(-90 ${size / 2} ${size / 2})`}
+          />
+        ))}
+      </svg>
+      <div className="fleet-donut-label">
+        <strong>{healthy}</strong>
+        <span>of {total} OK</span>
+      </div>
+    </div>
+  );
+}
+
+function FleetHealthHero({
+  counts,
+  totalSites,
+  openIncidents,
   settings,
   geoLabel,
   geoIp,
   geoSource,
+  online,
+  engineMode,
+  heartbeat,
+  engineCommitSha,
 }: {
+  counts: { healthy: number; attention: number; down: number };
+  totalSites: number;
+  openIncidents: number;
   settings: BeaconSettings | null;
   geoLabel: string | null;
   geoIp: string | null;
   geoSource: string | null;
+  online: boolean;
+  engineMode: string | null;
+  heartbeat: string | null;
+  engineCommitSha: string | null;
 }) {
   const [now, setNow] = useState(() => new Date());
 
@@ -109,42 +191,103 @@ function NextRunTimers({
     return () => clearInterval(t);
   }, []);
 
+  const formTimes = settings?.formTestTimesEastern?.length
+    ? settings.formTestTimesEastern
+    : [
+        '00:00',
+        '02:00',
+        '04:00',
+        '06:00',
+        '08:00',
+        '10:00',
+        '12:00',
+        '14:00',
+        '16:00',
+        '18:00',
+        '20:00',
+        '22:00',
+      ];
   const nextLoad = getNextLoadCheckAt(now);
-  const nextForm = getNextFormTestAt(
-    settings?.formTestTimesEastern || ['00:00', '06:00', '12:00', '18:00'],
-    now
-  );
+  const nextForm = getNextFormTestAt(formTimes, now);
 
   return (
-    <section className="next-run-panel" aria-live="polite">
-      <div className="next-run-card">
-        <span className="next-run-label">Next load check</span>
-        <strong className="next-run-countdown">{formatCountdown(nextLoad, now)}</strong>
-        <span className="next-run-when">
-          {formatPakistanTime(nextLoad.toISOString())} {TIME_LABEL} · every 30 min (GitHub)
-        </span>
+    <section className="fleet-health-hero" aria-live="polite">
+      <div className="fleet-health-main">
+        <FleetDonut
+          healthy={counts.healthy}
+          attention={counts.attention}
+          down={counts.down}
+          total={totalSites}
+        />
+        <div className="fleet-health-copy">
+          <h2>Fleet health</h2>
+          <p className="fleet-health-sub">Latest production checks</p>
+          <ul className="fleet-health-stats">
+            <li className="tone-ok">
+              <strong>{counts.healthy}</strong> Healthy
+            </li>
+            <li className="tone-warn">
+              <strong>{counts.attention}</strong> Attention
+            </li>
+            <li className="tone-bad">
+              <strong>{counts.down}</strong> Down
+            </li>
+            <li className="tone-incidents">
+              <strong>{openIncidents}</strong> Incidents
+            </li>
+          </ul>
+          <p className="fleet-health-meta">
+            {online ? 'Engine online' : 'Engine offline'}
+            {engineMode ? ` · ${engineMode}` : ''}
+            {heartbeat ? ` · ${formatRelativeTime(heartbeat)}` : ''}
+            {engineCommitSha ? ` · ${engineCommitSha.slice(0, 7)}` : ''}
+            {geoLabel
+              ? ` · ${geoLabel}${geoIp ? ` · IP ${geoIp}` : ''}${geoSource ? ` · ${geoSource}` : ''}`
+              : ''}
+          </p>
+        </div>
       </div>
-      <div className="next-run-card">
-        <span className="next-run-label">Next form test</span>
-        <strong className="next-run-countdown">
-          {nextForm ? formatCountdown(nextForm, now) : '—'}
-        </strong>
-        <span className="next-run-when">
-          {nextForm
-            ? `${formatPakistanTime(nextForm.toISOString())} ${TIME_LABEL} · 4× daily`
-            : 'Schedule not set'}
-        </span>
-      </div>
-      <div className="next-run-card location-card">
-        <span className="next-run-label">Checks run from</span>
-        <strong className="next-run-countdown location-text">
-          {geoLabel || 'Waiting for first GitHub run'}
-        </strong>
-        <span className="next-run-when">
-          {geoIp
-            ? `IP ${geoIp}${geoSource ? ` · ${geoSource}` : ''}`
-            : 'Location is recorded at the start of each US workflow'}
-        </span>
+
+      <div className="fleet-health-timers">
+        <div className="fleet-timer">
+          <span className="fleet-timer-icon" aria-hidden>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.6" />
+              <path d="M12 8v4.2l2.6 1.6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
+          </span>
+          <div>
+            <span className="fleet-timer-label">Load check</span>
+            <strong className="fleet-timer-countdown">{formatCountdown(nextLoad, now)}</strong>
+            <span className="fleet-timer-when">
+              30 min · {formatPakistanTime(nextLoad.toISOString())} {TIME_LABEL}
+            </span>
+          </div>
+        </div>
+        <div className="fleet-timer">
+          <span className="fleet-timer-icon" aria-hidden>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M7 3.75h7.2L19 8.6v11.65H7V3.75Z"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinejoin="round"
+              />
+              <path d="M14 3.75V8.5h4.8" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+            </svg>
+          </span>
+          <div>
+            <span className="fleet-timer-label">Form test</span>
+            <strong className="fleet-timer-countdown">
+              {nextForm ? formatCountdown(nextForm, now) : '—'}
+            </strong>
+            <span className="fleet-timer-when">
+              {nextForm
+                ? `${formTimes.length}× daily · ${formatPakistanTime(nextForm.toISOString())} ${TIME_LABEL}`
+                : 'Schedule not set'}
+            </span>
+          </div>
+        </div>
       </div>
     </section>
   );
@@ -263,9 +406,10 @@ export function Dashboard() {
 
   const counts = {
     healthy: summaries.filter((s) => effectiveHealth(s) === 'green').length,
-    attention: summaries.filter((s) => effectiveHealth(s) !== 'green' && effectiveHealth(s) !== 'gray').length,
+    attention: summaries.filter((s) => effectiveHealth(s) === 'yellow').length,
     down: summaries.filter((s) => effectiveHealth(s) === 'red').length,
   };
+  const openIncidents = summaries.reduce((n, s) => n + s.openIncidents, 0);
 
   return (
     <div>
@@ -276,57 +420,54 @@ export function Dashboard() {
 
       {error && <p className="error">{error}</p>}
 
-      <NextRunTimers
+      <FleetHealthHero
+        counts={counts}
+        totalSites={summaries.length}
+        openIncidents={openIncidents}
         settings={settings}
         geoLabel={geoLabel}
         geoIp={geoIp}
         geoSource={geoSource}
+        online={online}
+        engineMode={engineMode}
+        heartbeat={heartbeat}
+        engineCommitSha={engineCommitSha}
       />
 
-      <section className="fleet-summary">
-        <div className="summary-stat">
-          <strong>{sites.length}</strong>
-          <span>Sites</span>
-        </div>
-        <div className="summary-stat ok-stat">
-          <strong>{counts.healthy}</strong>
-          <span>Healthy</span>
-        </div>
-        <div className="summary-stat warn-stat">
-          <strong>{counts.attention}</strong>
-          <span>Needs attention</span>
-        </div>
-        <div className="summary-stat bad-stat">
-          <strong>{counts.down}</strong>
-          <span>Down / open issues</span>
-        </div>
-        <div className={`summary-stat engine-stat ${online ? 'online' : 'offline'}`}>
-          <strong>{online ? 'Online' : 'Offline'}</strong>
-          <span>
-            {online
-              ? `GitHub Actions · ${engineMode || 'production'} · ${formatRelativeTime(heartbeat)}${engineCommitSha ? ` · ${engineCommitSha.slice(0, 7)}` : ''}`
-              : 'Waiting for next GitHub Actions run (every 30 min)'}
+      <div className="fleet-toolbar">
+        <label className="fleet-search">
+          <span className="sr-only">Filter by site name or URL</span>
+          <span className="fleet-search-icon" aria-hidden>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+              <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.7" />
+              <path d="M16 16.5 20 20.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+            </svg>
           </span>
-        </div>
-      </section>
-
-      <div className="filter-bar">
-        <label className="search-field">
-          Search sites
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Filter by name or URL…"
+            placeholder="Filter by site name or URL..."
           />
         </label>
-        <Link className="button-link" to="/operations">
-          Run checks →
+        <Link className="fleet-run-btn" to="/operations">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path
+              d="M19.5 12a7.5 7.5 0 1 1-2.1-5.2"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+            />
+            <path d="M19.5 4.5v4.2h-4.2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          Run checks
         </Link>
       </div>
 
       {attention.length > 0 && (
         <section className="site-section">
-          <h2>Needs attention ({attention.length})</h2>
+          <h2>
+            Needs attention <span className="section-count">{attention.length}</span>
+          </h2>
           <div className="status-grid">
             {attention.map((s) => (
               <SiteCard
@@ -415,14 +556,30 @@ function SiteCard({
 
   const banners: Array<{ tone: 'warn' | 'bad' | 'ok'; text: string }> = [];
   for (const reason of reasons.slice(0, 2)) {
-    const tone = /rate.?limit|429|stale/i.test(reason) ? 'warn' : health === 'red' ? 'bad' : 'warn';
+    if (/^all profiles healthy$/i.test(reason)) {
+      const text =
+        latestForm?.logo_upload_ok === true
+          ? 'All profiles healthy · Logo uploaded OK'
+          : reason;
+      banners.push({ tone: 'ok', text });
+      continue;
+    }
+    const tone = /rate.?limit|429|stale/i.test(reason)
+      ? 'warn'
+      : /slow|not found|did not load|failed/i.test(reason) || health === 'red'
+        ? 'bad'
+        : 'warn';
     banners.push({ tone, text: reason });
   }
   if (latestForm && formSkipped) {
     banners.push({ tone: 'warn', text: formTestSummary(latestForm) });
   } else if (formFail && latestForm) {
     banners.push({ tone: 'bad', text: formTestSummary(latestForm) });
-  } else if (formOk && latestForm?.logo_upload_ok === true) {
+  } else if (
+    formOk &&
+    latestForm?.logo_upload_ok === true &&
+    !banners.some((b) => /logo uploaded ok/i.test(b.text))
+  ) {
     banners.push({ tone: 'ok', text: 'Form passed — logo upload OK.' });
   }
 
