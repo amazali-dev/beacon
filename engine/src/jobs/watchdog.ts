@@ -13,43 +13,27 @@ function olderThan(value: string | null | undefined, maxMs: number): boolean {
 
 export async function runOperationalWatchdog(): Promise<void> {
   const sb = getSupabase();
-  const [loadRun, formSlot] = await Promise.all([
-    sb
-      .from('monitor_runs')
-      .select('completed_at')
-      .eq('job_type', 'load_check')
-      .eq('is_production', true)
-      .in('status', ['completed', 'partial'])
-      .order('completed_at', { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-    sb
-      .from('schedule_slots')
-      .select('completed_at')
-      .eq('job_type', 'form_test')
-      .eq('status', 'completed')
-      .order('completed_at', { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-  ]);
+  const formSlot = await sb
+    .from('schedule_slots')
+    .select('completed_at')
+    .eq('job_type', 'form_test')
+    .eq('status', 'completed')
+    .order('completed_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
-  for (const result of [loadRun, formSlot]) {
-    if (result.error) throw new Error(`Watchdog query failed: ${result.error.message}`);
+  if (formSlot.error) throw new Error(`Watchdog query failed: ${formSlot.error.message}`);
+
+  // Close alerts for jobs that are intentionally disabled.
+  for (const key of ['missed_daily_report', 'missed_load_run']) {
+    await sb
+      .from('operational_alerts')
+      .update({ closed_at: new Date().toISOString() })
+      .eq('key', key)
+      .is('closed_at', null);
   }
 
-  // Close stale daily-report alert — scheduled reports are disabled for now.
-  await sb
-    .from('operational_alerts')
-    .update({ closed_at: new Date().toISOString() })
-    .eq('key', 'missed_daily_report')
-    .is('closed_at', null);
-
   const states: AlertState[] = [
-    {
-      key: 'missed_load_run',
-      detail: 'No completed production load run has been recorded in the last 90 minutes.',
-      overdue: olderThan(loadRun.data?.completed_at, 90 * 60_000),
-    },
     {
       key: 'missed_form_slot',
       detail: 'No completed scheduled form slot has been recorded in the last 8 hours.',

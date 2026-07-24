@@ -1,13 +1,9 @@
-# Load + render checks — once per hour, one rotating profile
-# (desktop → Safari → mobile). Skips Eastern hours that have a form slot.
+# Load + render checks — DISABLED for now (forms only).
+# Re-enable by restoring the cron below. Manual "Run workflow" still works.
 
 name: Load checks
 
-# Triggers: GitHub schedule (often delayed) + manual Run workflow.
 on:
-  schedule:
-    # Once hourly (UTC). Engine skips the run when Eastern hour is a form-test hour.
-    - cron: "17 * * * *"
   workflow_dispatch:
     inputs:
       complete_all_checks:
@@ -18,6 +14,8 @@ on:
         description: Run desktop + Safari + mobile in one job (bandwidth-heavy; default is one rotating profile)
         type: boolean
         default: false
+  # schedule:
+  #   - cron: "17 * * * *"
 
 concurrency:
   group: load-checks

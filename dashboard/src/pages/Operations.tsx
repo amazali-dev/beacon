@@ -30,15 +30,10 @@ const RUN_ACTIONS: Array<{
   primary?: boolean;
 }> = [
   {
-    jobType: 'load_check',
-    label: 'Load checks',
-    desc: 'Starts a US GitHub Actions load check now.',
-    primary: true,
-  },
-  {
     jobType: 'form_test',
     label: 'Form tests',
     desc: 'Starts a US GitHub Actions form test now.',
+    primary: true,
   },
   {
     jobType: 'detect_forms',
@@ -258,7 +253,7 @@ export function Operations() {
             <p className="meta">
               {online
                 ? `Last completed load run ${formatPakistanTime(heartbeat)} ${TIME_LABEL} (${formatRelativeTime(heartbeat)}) · ${engineMode || 'production'}${engineCommitSha ? ` · ${engineCommitSha.slice(0, 7)}` : ''}`
-                : 'Use Run now below, or wait for the next scheduled load check (~hourly; skipped on form hours).'}
+                : 'Use Run now below, or wait for the next scheduled form test (every 2 hours Eastern).'}
             </p>
           </div>
         </div>
@@ -268,8 +263,7 @@ export function Operations() {
         <h2>Production schedule (automatic)</h2>
         <ul className="schedule-readonly">
           <li>
-            <strong>Load checks</strong> — every {settings?.loadCheckIntervalMinutes || 60} minutes
-            (skipped in Eastern hours that also run form tests)
+            <strong>Load checks</strong> — off
           </li>
           <li>
             <strong>Form tests</strong> — {settings?.formTestTimesEastern.join(', ') || 'not configured'} US Eastern

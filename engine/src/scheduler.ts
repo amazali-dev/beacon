@@ -7,10 +7,8 @@ import { getDeploymentMode, getStagingLabel, isStagingMode } from './config.js';
 import { fetchRuntimeSettings, touchEngineHeartbeat } from './db/settings.js';
 import { runGeoGuard } from './geo-guard.js';
 import { processPendingJobs } from './jobs/queue.js';
-import { runAllLoadChecks, isEasternFormHour } from './modules/load-check.js';
 import { runAllFormTests } from './modules/form-test.js';
 
-let lastLoadRun = 0;
 const firedFormSlots = new Set<string>();
 
 function nowEasternHM(): string {
@@ -46,26 +44,8 @@ async function schedulerTick(): Promise<void> {
 
   await processPendingJobs();
 
-  const now = Date.now();
-  const loadDue =
-    lastLoadRun === 0 ||
-    now - lastLoadRun >= settings.loadCheckIntervalMinutes * 60 * 1000;
-
-  if (loadDue) {
-    if (isEasternFormHour(settings.formTestTimesEastern)) {
-      console.log(
-        '\n=== Skipping scheduled load-check (form tests run this Eastern hour) ==='
-      );
-    } else {
-      console.log('\n=== Scheduled load-check run ===');
-      try {
-        await runAllLoadChecks({ geo });
-        lastLoadRun = Date.now();
-      } catch (err) {
-        console.error('Load check failed:', err);
-      }
-    }
-  }
+  // Load checks disabled for now — forms only. Re-enable when needed.
+  // (see .github/workflows/load-checks.yml schedule)
 
   const hm = nowEasternHM();
   const day = easternDateKey();
@@ -83,17 +63,13 @@ async function schedulerTick(): Promise<void> {
   }
 
   // Daily report disabled for now — re-enable when needed.
-  // if (hm === settings.dailyReportTimeEastern && firedReportDay !== day) {
-  //   ...
-  // }
 }
 
 export async function startScheduler(): Promise<void> {
   const settings = await fetchRuntimeSettings();
   console.log(
     `Beacon scheduler (${isStagingMode() ? getStagingLabel() : 'production'}). ` +
-      `Schedule from dashboard: load every ${settings.loadCheckIntervalMinutes} min, ` +
-      `forms ${settings.formTestTimesEastern.join(', ')} ET (daily report off).`
+      `Forms ${settings.formTestTimesEastern.join(', ')} ET (load checks + daily report off).`
   );
 
   await schedulerTick();
