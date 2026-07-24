@@ -1,11 +1,12 @@
-# Hourly recovery poll; the engine claims each 23:30 Eastern report slot once.
+# Daily report — DISABLED for now (no schedule).
+# Re-enable by restoring the cron below. Manual "Run workflow" still works.
 
 name: Daily report
 
 on:
-  schedule:
-    - cron: "41 * * * *"
   workflow_dispatch:
+  # schedule:
+  #   - cron: "41 * * * *"
 
 concurrency:
   group: daily-report

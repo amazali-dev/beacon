@@ -13,7 +13,7 @@ function olderThan(value: string | null | undefined, maxMs: number): boolean {
 
 export async function runOperationalWatchdog(): Promise<void> {
   const sb = getSupabase();
-  const [loadRun, formSlot, reportSlot] = await Promise.all([
+  const [loadRun, formSlot] = await Promise.all([
     sb
       .from('monitor_runs')
       .select('completed_at')
@@ -31,19 +31,18 @@ export async function runOperationalWatchdog(): Promise<void> {
       .order('completed_at', { ascending: false })
       .limit(1)
       .maybeSingle(),
-    sb
-      .from('schedule_slots')
-      .select('completed_at')
-      .eq('job_type', 'daily_report')
-      .eq('status', 'completed')
-      .order('completed_at', { ascending: false })
-      .limit(1)
-      .maybeSingle(),
   ]);
 
-  for (const result of [loadRun, formSlot, reportSlot]) {
+  for (const result of [loadRun, formSlot]) {
     if (result.error) throw new Error(`Watchdog query failed: ${result.error.message}`);
   }
+
+  // Close stale daily-report alert — scheduled reports are disabled for now.
+  await sb
+    .from('operational_alerts')
+    .update({ closed_at: new Date().toISOString() })
+    .eq('key', 'missed_daily_report')
+    .is('closed_at', null);
 
   const states: AlertState[] = [
     {
@@ -55,11 +54,6 @@ export async function runOperationalWatchdog(): Promise<void> {
       key: 'missed_form_slot',
       detail: 'No completed scheduled form slot has been recorded in the last 8 hours.',
       overdue: olderThan(formSlot.data?.completed_at, 8 * 60 * 60_000),
-    },
-    {
-      key: 'missed_daily_report',
-      detail: 'No completed daily report slot has been recorded in the last 32 hours.',
-      overdue: olderThan(reportSlot.data?.completed_at, 32 * 60 * 60_000),
     },
   ];
 

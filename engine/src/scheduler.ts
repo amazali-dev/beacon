@@ -9,11 +9,9 @@ import { runGeoGuard } from './geo-guard.js';
 import { processPendingJobs } from './jobs/queue.js';
 import { runAllLoadChecks, isEasternFormHour } from './modules/load-check.js';
 import { runAllFormTests } from './modules/form-test.js';
-import { generateAndSendDailyReport } from './reports/daily.js';
 
 let lastLoadRun = 0;
 const firedFormSlots = new Set<string>();
-let firedReportDay = '';
 
 function nowEasternHM(): string {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -84,15 +82,10 @@ async function schedulerTick(): Promise<void> {
     }
   }
 
-  if (hm === settings.dailyReportTimeEastern && firedReportDay !== day) {
-    firedReportDay = day;
-    console.log('\n=== Daily report ===');
-    try {
-      await generateAndSendDailyReport();
-    } catch (err) {
-      console.error('Daily report failed:', err);
-    }
-  }
+  // Daily report disabled for now — re-enable when needed.
+  // if (hm === settings.dailyReportTimeEastern && firedReportDay !== day) {
+  //   ...
+  // }
 }
 
 export async function startScheduler(): Promise<void> {
@@ -100,7 +93,7 @@ export async function startScheduler(): Promise<void> {
   console.log(
     `Beacon scheduler (${isStagingMode() ? getStagingLabel() : 'production'}). ` +
       `Schedule from dashboard: load every ${settings.loadCheckIntervalMinutes} min, ` +
-      `forms ${settings.formTestTimesEastern.join(', ')} ET, report ${settings.dailyReportTimeEastern} ET.`
+      `forms ${settings.formTestTimesEastern.join(', ')} ET (daily report off).`
   );
 
   await schedulerTick();

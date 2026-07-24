@@ -17,7 +17,6 @@ import {
   type OperationalAlert,
 } from '../lib/operations';
 import {
-  easternHmToPakistanHm,
   easternTimesToPakistanText,
   formatPakistanTime,
   formatRelativeTime,
@@ -45,11 +44,6 @@ const RUN_ACTIONS: Array<{
     jobType: 'detect_forms',
     label: 'Detect fields',
     desc: 'Starts form-field detection on the US runner now.',
-  },
-  {
-    jobType: 'daily_report',
-    label: 'Daily report',
-    desc: 'Starts the daily report job on GitHub Actions now.',
   },
 ];
 
@@ -225,9 +219,6 @@ export function Operations() {
   const formTimesPkt = settings
     ? easternTimesToPakistanText(settings.formTestTimesEastern)
     : '—';
-  const reportPkt = settings
-    ? easternHmToPakistanHm(settings.dailyReportTimeEastern)
-    : '—';
 
   return (
     <div>
@@ -285,8 +276,7 @@ export function Operations() {
             {settings ? ` (≈ ${formTimesPkt} ${TIME_LABEL})` : ''}
           </li>
           <li>
-            <strong>Daily report</strong> — {settings?.dailyReportTimeEastern || 'not configured'} US Eastern
-            {settings ? ` (≈ ${reportPkt} ${TIME_LABEL})` : ''}
+            <strong>Daily report</strong> — off
           </li>
         </ul>
       </section>
