@@ -132,10 +132,7 @@ async function waitForLogoUploadState(
   notes.push(`✗ Logo upload timeout - no success indicator found after ${timeoutMs}ms`);
   return 'failed';
 }
-Update 2: Add debugging logs in uploadLogoOnce()
-Update the uploadLogoOnce() function to log what's happening:
 
-TypeScript
 async function uploadLogoOnce(
   page: Page,
   fileInput: Locator,
@@ -168,24 +165,6 @@ async function uploadLogoOnce(
 
   notes.push(`Attempt ${attempt}: logo upload reported a network failure`);
   notes.push(`✗ [Upload Attempt ${attempt}] FAILED`);
-  return false;
-}
-
-async function uploadLogoOnce(
-  page: Page,
-  fileInput: Locator,
-  logo: LogoAsset,
-  attempt: number,
-  notes: string[]
-): Promise<boolean> {
-  await fileInput.setInputFiles(logo.path);
-  notes.push(`Attempt ${attempt}: uploading logo ${logo.label}`);
-  const state = await waitForLogoUploadState(page, notes);
-  if (state === 'success' || state === 'quiet') {
-    notes.push(`Attempt ${attempt}: logo upload accepted`);
-    return true;
-  }
-  notes.push(`Attempt ${attempt}: logo upload reported a network failure`);
   return false;
 }
 
