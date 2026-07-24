@@ -83,7 +83,9 @@ async function waitForLogoUploadState(
   timeoutMs = 30_000
 ): Promise<'success' | 'failed' | 'quiet'> {
   const started = Date.now();
+  
   while (Date.now() - started < timeoutMs) {
+    // Check 1: Explicit success message (signmakerz style)
     const failed = await page
       .getByText(/failed\s*(?:to upload|[-—:]\s*network error)|upload failed|network error/i)
       .first()
@@ -98,15 +100,74 @@ async function waitForLogoUploadState(
       .catch(() => false);
     if (succeeded) return 'success';
 
+    // Check 2: Hidden input population (signage.inc, signmakerz style)
+    // Many modern forms populate a hidden imageUrl input on successful upload
+    const imageUrlValue = await page
+      .locator('input[type="hidden"][id*="imageUrl"], input[type="text"][id*="imageUrl"], input[name*="imageUrl"]')
+      .evaluate((element: HTMLInputElement) => (element?.value || '').trim())
+      .catch(() => '');
+    
+    if (imageUrlValue && imageUrlValue.length > 0) {
+      console.log(`✓ Logo upload success: imageUrl populated with "${imageUrlValue.substring(0, 50)}..."`);
+      return 'success';
+    }
+
+    // Check 3: Uploading indicator present
     const uploading = await page
       .getByText(/uploading/i)
       .first()
       .isVisible()
       .catch(() => false);
-    if (!uploading && Date.now() - started >= 4_000) return 'quiet';
+    
+    if (!uploading && Date.now() - started >= 4_000) {
+      // After 4 seconds with no "uploading" text, treat as quiet (success)
+      console.log(`✓ Logo upload quiet state (no feedback, but likely succeeded)`);
+      return 'quiet';
+    }
+    
     await page.waitForTimeout(500);
   }
+  
+  console.log(`✗ Logo upload timeout - no success indicator found after ${timeoutMs}ms`);
   return 'failed';
+}
+Update 2: Add debugging logs in uploadLogoOnce()
+Update the uploadLogoOnce() function to log what's happening:
+
+TypeScript
+async function uploadLogoOnce(
+  page: Page,
+  fileInput: Locator,
+  logo: LogoAsset,
+  attempt: number,
+  notes: string[]
+): Promise<boolean> {
+  console.log(`[Upload Attempt ${attempt}] Starting with logo: ${logo.label}`);
+  console.log(`[Upload Attempt ${attempt}] File input count: ${await fileInput.count()}`);
+  
+  try {
+    await fileInput.setInputFiles(logo.path);
+    console.log(`[Upload Attempt ${attempt}] File set via setInputFiles()`);
+  } catch (err) {
+    console.error(`[Upload Attempt ${attempt}] Failed to set file: ${err}`);
+    notes.push(`Attempt ${attempt}: failed to set file input`);
+    return false;
+  }
+  
+  notes.push(`Attempt ${attempt}: uploading logo ${logo.label}`);
+  const state = await waitForLogoUploadState(page);
+  
+  console.log(`[Upload Attempt ${attempt}] Final state: ${state}`);
+  
+  if (state === 'success' || state === 'quiet') {
+    notes.push(`Attempt ${attempt}: logo upload accepted`);
+    console.log(`✓ [Upload Attempt ${attempt}] PASSED`);
+    return true;
+  }
+  
+  notes.push(`Attempt ${attempt}: logo upload reported a network failure`);
+  console.log(`✗ [Upload Attempt ${attempt}] FAILED`);
+  return false;
 }
 
 async function uploadLogoOnce(
