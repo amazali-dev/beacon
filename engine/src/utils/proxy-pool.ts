@@ -4,6 +4,7 @@ import {
   getEnvironmentProxy,
   type BrowserProxy,
 } from './browser.js';
+import { blockHeavyAssets } from './bandwidth.js';
 
 type StoredProxy = BrowserProxy & {
   id?: string;
@@ -191,6 +192,7 @@ export async function markProxyBlocked(
 }
 
 export async function verifyProxyEgress(context: BrowserContext): Promise<ProxyEgress> {
+  await blockHeavyAssets(context);
   const page = await context.newPage();
   try {
     const response = await page.goto('https://www.cloudflare.com/cdn-cgi/trace', {
