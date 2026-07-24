@@ -133,22 +133,20 @@ export function sinceDays(days: number): string {
   return sinceIso(days * 24);
 }
 
-/** Next GitHub Actions load-check slot (workflow cron at :07 and :37 UTC). */
+/** Next GitHub Actions load-check slot (workflow cron at :17 UTC each hour). */
 export function getNextLoadCheckAt(from = new Date()): Date {
   const d = new Date(from);
   d.setUTCSeconds(0, 0);
   d.setUTCMilliseconds(0);
   const mins = d.getUTCMinutes();
-  if (mins < 7) {
-    d.setUTCMinutes(7);
-  } else if (mins < 37) {
-    d.setUTCMinutes(37);
+  if (mins < 17) {
+    d.setUTCMinutes(17);
   } else {
-    d.setUTCMinutes(7);
+    d.setUTCMinutes(17);
     d.setUTCHours(d.getUTCHours() + 1);
   }
   if (d.getTime() <= from.getTime()) {
-    d.setTime(d.getTime() + 30 * 60_000);
+    d.setUTCHours(d.getUTCHours() + 1);
   }
   return d;
 }

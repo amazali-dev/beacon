@@ -29,7 +29,7 @@ import {
   completeScheduleSlot,
 } from './jobs/schedule-slots.js';
 import { runOperationalWatchdog } from './jobs/watchdog.js';
-import { runAllLoadChecks } from './modules/load-check.js';
+import { runAllLoadChecks, isEasternFormHour } from './modules/load-check.js';
 import { runAllFormTests } from './modules/form-test.js';
 import { detectFormsForAllSites } from './modules/form-detect.js';
 import { generateAndSendDailyReport } from './reports/daily.js';
@@ -259,6 +259,16 @@ async function main(): Promise<void> {
   }
 
   // Default: load checks once (or --once)
+  // Scheduled loads skip Eastern hours that already run form tests (bandwidth).
+  if (process.env.GITHUB_EVENT_NAME === 'schedule' && isEasternFormHour(config.formTestTimesEastern)) {
+    console.log(
+      'Skipping scheduled load check — form tests run this Eastern hour (proxy bandwidth).'
+    );
+    const geo = await runGeoGuard();
+    await bumpHeartbeat(geo);
+    return;
+  }
+
   const geo = await runGeoGuard();
   await bumpHeartbeat(geo);
   if (shouldSkipProductionWrite(geo)) return;

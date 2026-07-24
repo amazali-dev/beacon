@@ -1,13 +1,13 @@
-# Load + render checks — every 30 minutes, one rotating profile
-# (desktop → Safari → mobile) to cut proxy bandwidth.
+# Load + render checks — once per hour, one rotating profile
+# (desktop → Safari → mobile). Skips Eastern hours that have a form slot.
 
 name: Load checks
 
 # Triggers: GitHub schedule (often delayed) + manual Run workflow.
 on:
   schedule:
-    # Twice hourly: each run covers one device profile for the current 30m Eastern slot.
-    - cron: "17,47 * * * *"
+    # Once hourly (UTC). Engine skips the run when Eastern hour is a form-test hour.
+    - cron: "17 * * * *"
   workflow_dispatch:
     inputs:
       complete_all_checks:

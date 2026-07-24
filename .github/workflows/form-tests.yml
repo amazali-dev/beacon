@@ -1,5 +1,5 @@
 # Hourly recovery poll. The engine atomically claims the latest due Eastern
-# two-hour slot, so delayed cron runs cannot skip or duplicate it.
+# two-hour slot (00/02/…/22 ET), so delayed cron runs cannot skip or duplicate it.
 
 name: Form tests
 

@@ -44,7 +44,7 @@ export type OperationalAlert = {
 export type JobType = 'load_check' | 'form_test' | 'detect_forms' | 'daily_report';
 
 const DEFAULTS: BeaconSettings = {
-  loadCheckIntervalMinutes: 30,
+  loadCheckIntervalMinutes: 60,
   formTestTimesEastern: [
     '00:00',
     '02:00',
@@ -214,7 +214,7 @@ export async function loadOperationalAlerts(): Promise<OperationalAlert[]> {
 
 /**
  * Engine is "online" if GitHub Actions (or a local run) reported a heartbeat
- * within the last 90 minutes. Load checks run every 30 minutes, so a 3-minute
+ * within the last 90 minutes. Load checks run about hourly, so a 3-minute
  * window would always look offline on GitHub Actions.
  */
 export function engineOnline(heartbeat: string | null): boolean {

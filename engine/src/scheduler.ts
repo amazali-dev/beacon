@@ -7,8 +7,8 @@ import { getDeploymentMode, getStagingLabel, isStagingMode } from './config.js';
 import { fetchRuntimeSettings, touchEngineHeartbeat } from './db/settings.js';
 import { runGeoGuard } from './geo-guard.js';
 import { processPendingJobs } from './jobs/queue.js';
+import { runAllLoadChecks, isEasternFormHour } from './modules/load-check.js';
 import { runAllFormTests } from './modules/form-test.js';
-import { runAllLoadChecks } from './modules/load-check.js';
 import { generateAndSendDailyReport } from './reports/daily.js';
 
 let lastLoadRun = 0;
@@ -54,12 +54,18 @@ async function schedulerTick(): Promise<void> {
     now - lastLoadRun >= settings.loadCheckIntervalMinutes * 60 * 1000;
 
   if (loadDue) {
-    console.log('\n=== Scheduled load-check run ===');
-    try {
-      await runAllLoadChecks({ geo });
-      lastLoadRun = Date.now();
-    } catch (err) {
-      console.error('Load check failed:', err);
+    if (isEasternFormHour(settings.formTestTimesEastern)) {
+      console.log(
+        '\n=== Skipping scheduled load-check (form tests run this Eastern hour) ==='
+      );
+    } else {
+      console.log('\n=== Scheduled load-check run ===');
+      try {
+        await runAllLoadChecks({ geo });
+        lastLoadRun = Date.now();
+      } catch (err) {
+        console.error('Load check failed:', err);
+      }
     }
   }
 

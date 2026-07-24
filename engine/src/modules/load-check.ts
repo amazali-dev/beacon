@@ -33,7 +33,7 @@ import {
   isJobCancelledError,
 } from '../jobs/progress.js';
 
-/** 30-minute Eastern slots: desktop → Safari (webkit) → mobile → repeat. */
+/** Hourly Eastern slots: desktop → Safari (webkit) → mobile → repeat. */
 export function rotatingLoadProfile(now = new Date()): DeviceProfile {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York',
@@ -42,10 +42,23 @@ export function rotatingLoadProfile(now = new Date()): DeviceProfile {
     hour12: false,
   }).formatToParts(now);
   const hourRaw = parts.find((p) => p.type === 'hour')!.value;
-  const minute = Number(parts.find((p) => p.type === 'minute')!.value);
   const hour = Number(hourRaw === '24' ? '0' : hourRaw);
-  const slot = Math.floor((hour * 60 + minute) / 30) % 3;
-  return (['desktop', 'webkit', 'mobile'] as const)[slot];
+  return (['desktop', 'webkit', 'mobile'] as const)[hour % 3];
+}
+
+/** True when the current Eastern hour has a scheduled form-test slot (e.g. 10:00). */
+export function isEasternFormHour(
+  formTimesEastern: string[],
+  now = new Date()
+): boolean {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    hour: '2-digit',
+    hour12: false,
+  }).formatToParts(now);
+  const hourRaw = parts.find((p) => p.type === 'hour')!.value;
+  const hour = Number(hourRaw === '24' ? '0' : hourRaw);
+  return formTimesEastern.some((hm) => Number(hm.split(':')[0]) === hour);
 }
 
 const DEFAULT_SELECTORS: Record<string, string> = {

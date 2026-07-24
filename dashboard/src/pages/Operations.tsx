@@ -267,7 +267,7 @@ export function Operations() {
             <p className="meta">
               {online
                 ? `Last completed load run ${formatPakistanTime(heartbeat)} ${TIME_LABEL} (${formatRelativeTime(heartbeat)}) · ${engineMode || 'production'}${engineCommitSha ? ` · ${engineCommitSha.slice(0, 7)}` : ''}`
-                : 'Use Run now below, or wait for the next scheduled load check (~every 30 min).'}
+                : 'Use Run now below, or wait for the next scheduled load check (~hourly; skipped on form hours).'}
             </p>
           </div>
         </div>
@@ -277,7 +277,8 @@ export function Operations() {
         <h2>Production schedule (automatic)</h2>
         <ul className="schedule-readonly">
           <li>
-            <strong>Load checks</strong> — every {settings?.loadCheckIntervalMinutes || 30} minutes
+            <strong>Load checks</strong> — every {settings?.loadCheckIntervalMinutes || 60} minutes
+            (skipped in Eastern hours that also run form tests)
           </li>
           <li>
             <strong>Form tests</strong> — {settings?.formTestTimesEastern.join(', ') || 'not configured'} US Eastern

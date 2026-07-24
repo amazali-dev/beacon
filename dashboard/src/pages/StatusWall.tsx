@@ -260,7 +260,7 @@ function FleetHealthHero({
             <span className="fleet-timer-label">Load check</span>
             <strong className="fleet-timer-countdown">{formatCountdown(nextLoad, now)}</strong>
             <span className="fleet-timer-when">
-              30 min · {formatPakistanTime(nextLoad.toISOString())} {TIME_LABEL}
+              ~hourly · {formatPakistanTime(nextLoad.toISOString())} {TIME_LABEL}
             </span>
           </div>
         </div>
