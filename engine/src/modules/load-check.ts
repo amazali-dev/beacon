@@ -27,6 +27,11 @@ import { classifyCheckOutcome } from '../utils/outcomes.js';
 import { captureCheckScreenshot } from '../utils/screenshots.js';
 import { gotoWithRetries, sleep } from '../utils/navigate.js';
 import { maybeSendAlert } from '../alerts/email.js';
+import {
+  assertNotCancelled,
+  emitJobEvent,
+  isJobCancelledError,
+} from '../jobs/progress.js';
 
 /** 30-minute Eastern slots: desktop → Safari (webkit) → mobile → repeat. */
 export function rotatingLoadProfile(now = new Date()): DeviceProfile {
@@ -655,6 +660,7 @@ export async function runAllLoadChecks(opts: {
   allProfiles?: boolean;
   siteId?: string | null;
   profile?: DeviceProfile | null;
+  jobId?: string;
 }): Promise<number> {
   const { fetchActiveSites } = await import('../db/supabase.js');
   const sites = await fetchActiveSites({ oneSite: opts.oneSite, siteId: opts.siteId });
@@ -687,18 +693,50 @@ export async function runAllLoadChecks(opts: {
   for (let pi = 0; pi < profiles.length; pi++) {
     const profile = profiles[pi];
     for (const site of sites) {
+      await assertNotCancelled(opts.jobId);
       console.log(`→ ${site.name} / ${profile} …`);
+      await emitJobEvent(opts.jobId, {
+        phase: 'site_start',
+        message: `Starting ${site.name} (${profile})`,
+        siteId: site.id,
+        siteName: site.name,
+      });
       let statusCode: number | null = null;
       try {
+        await emitJobEvent(opts.jobId, {
+          phase: 'step',
+          message: 'Opening page',
+          siteId: site.id,
+          siteName: site.name,
+        });
         const result = await runLoadCheckForSiteProfile(site, profile, opts.geo);
         statusCode = result.statusCode;
         console.log(
           `  status=${result.statusCode} loaded=${result.loaded} loadMs=${result.loadMs} failed=${result.failed}`
         );
+        await emitJobEvent(opts.jobId, {
+          phase: 'step',
+          message: `Result: status=${result.statusCode ?? 'n/a'} loaded=${result.loaded}`,
+          siteId: site.id,
+          siteName: site.name,
+        });
+        await emitJobEvent(opts.jobId, {
+          phase: 'site_done',
+          message: `${site.name} (${profile}) done`,
+          siteId: site.id,
+          siteName: site.name,
+        });
         completedChecks += 1;
       } catch (err) {
+        if (isJobCancelledError(err)) throw err;
         const message = err instanceof Error ? err.message : String(err);
         console.error(`  CHECK FAILED TO RUN: ${message}`);
+        await emitJobEvent(opts.jobId, {
+          phase: 'error',
+          message: message.slice(0, 300),
+          siteId: site.id,
+          siteName: site.name,
+        });
         await openIncident({
           site_id: site.id,
           type: 'check_failed_to_run',
@@ -755,6 +793,7 @@ export async function runAllLoadChecks(opts: {
       await sleep(pause);
     }
     if (pi < profiles.length - 1) {
+      await assertNotCancelled(opts.jobId);
       console.log(`  profile gap ${Math.round(betweenProfiles / 1000)}s before next browser…`);
       await sleep(betweenProfiles);
     }

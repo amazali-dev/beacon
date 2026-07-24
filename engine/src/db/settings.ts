@@ -121,6 +121,7 @@ export async function claimNextJob(): Promise<{
   id: string;
   job_type: CheckJobType;
   site_id: string | null;
+  cancel_requested_at: string | null;
 } | null> {
   const runnerId =
     getEnv('GITHUB_RUN_ID') || `local-${process.pid}-${Date.now().toString(36)}`;
@@ -134,22 +135,46 @@ export async function claimNextJob(): Promise<{
   // Support both the jsonb RPC payload and older composite-row responses.
   const row = Array.isArray(data) ? data[0] : data;
   if (!row || typeof row !== 'object') return null;
-  const job = row as { id?: string; job_type?: CheckJobType; site_id?: string | null };
+  const job = row as {
+    id?: string;
+    job_type?: CheckJobType;
+    site_id?: string | null;
+    cancel_requested_at?: string | null;
+  };
   if (!job.id || !job.job_type) {
     throw new Error(`Claimed job payload was incomplete: ${JSON.stringify(row)}`);
   }
-  return { id: job.id, job_type: job.job_type, site_id: job.site_id ?? null };
+
+  const githubRunId = getEnv('GITHUB_RUN_ID');
+  if (githubRunId) {
+    const { error: runErr } = await getSupabase()
+      .from('check_jobs')
+      .update({ github_run_id: githubRunId })
+      .eq('id', job.id);
+    if (runErr) {
+      console.warn(`Could not store github_run_id for job ${job.id}: ${runErr.message}`);
+    }
+  }
+
+  return {
+    id: job.id,
+    job_type: job.job_type,
+    site_id: job.site_id ?? null,
+    cancel_requested_at: job.cancel_requested_at ?? null,
+  };
 }
 
 export async function finishJob(
   id: string,
   ok: boolean,
-  notes?: string
+  notes?: string,
+  opts?: { cancelled?: boolean }
 ): Promise<void> {
+  const status = opts?.cancelled ? 'cancelled' : ok ? 'done' : 'failed';
   const { error } = await getSupabase()
     .from('check_jobs')
     .update({
-      status: ok ? 'done' : 'failed',
+      status,
       completed_at: new Date().toISOString(),
       notes: notes || null,
       lease_expires_at: null,

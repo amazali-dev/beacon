@@ -1265,6 +1265,62 @@ th {
   color: #b8f0e4;
 }
 
+.live-job-panel .live-job-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.live-job-panel .live-job-head h2 {
+  margin-bottom: 0.25rem;
+}
+
+.live-job-panel .live-job-head .section-hint {
+  margin: 0;
+}
+
+.live-job-done-list,
+.live-job-steps {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.live-job-done-list {
+  color: var(--muted);
+  font-size: 0.88rem;
+  margin-bottom: 0.75rem;
+}
+
+.live-job-current {
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  padding: 0.75rem 0.9rem;
+  background: var(--panel-2);
+}
+
+.live-job-current-site {
+  display: block;
+  margin-bottom: 0.45rem;
+}
+
+.live-job-steps li {
+  font-size: 0.9rem;
+  line-height: 1.4;
+  margin-bottom: 0.2rem;
+}
+
+.live-job-row-actions {
+  display: flex;
+  gap: 0.65rem;
+  justify-content: flex-end;
+}
+
+.danger-link {
+  color: var(--danger) !important;
+}
+
 .advanced-toggle {
   margin-top: 0.25rem;
   font-size: 0.88rem;

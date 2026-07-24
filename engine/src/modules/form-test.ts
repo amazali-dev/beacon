@@ -44,6 +44,11 @@ import {
 import { captureFormScreenshot } from '../utils/screenshots.js';
 import { gotoWithRetries, pageLooksRateLimited, sleep } from '../utils/navigate.js';
 import {
+  assertNotCancelled,
+  emitJobEvent,
+  isJobCancelledError,
+} from '../jobs/progress.js';
+import {
   clickQuoteSubmit,
   completeSignageQuoteSteps,
   emailFieldContainsUrl,
@@ -125,12 +130,21 @@ async function uploadLogoOnce(
 export async function runFormTestForSite(
   site: SiteRow,
   geo: GeoGuardResult,
-  opts?: { headed?: boolean }
+  opts?: { headed?: boolean; jobId?: string }
 ): Promise<{ rateLimited: boolean; ok: boolean }> {
   const config = loadConfig();
   const identity = getTestIdentity(config);
   const runId = buildRunId();
   const message = identity.messageTemplate.replace('{runId}', runId);
+  const jobId = opts?.jobId;
+  const step = async (msg: string) => {
+    await emitJobEvent(jobId, {
+      phase: 'step',
+      message: msg,
+      siteId: site.id,
+      siteName: site.name,
+    });
+  };
   let layer1: boolean | null = null;
   let layer2: boolean | null = null;
   let layer3: boolean | null = null;
@@ -156,6 +170,14 @@ export async function runFormTestForSite(
     console.log(`  Form testing disabled for ${site.name} — skipped.`);
     return { rateLimited: false, ok: true };
   }
+
+  await assertNotCancelled(jobId);
+  await emitJobEvent(jobId, {
+    phase: 'site_start',
+    message: `Starting ${site.name}`,
+    siteId: site.id,
+    siteName: site.name,
+  });
 
   const siteReady = await ensureFormSelectors(site);
   const selectors = siteReady.form_selectors || {};
@@ -218,7 +240,9 @@ export async function runFormTestForSite(
   let submittedAt = Date.now();
 
   try {
+    await assertNotCancelled(jobId);
     let nav = await gotoWithRetries(page, formUrl, 1);
+    await step('Opened page');
     if (selectedProxy) {
       fallbackStatus = nav.statusCode;
       notes.push(`Attempt 1 ${selectedProxy.label}: HTTP ${nav.statusCode ?? 'no response'}.`);
@@ -334,7 +358,8 @@ export async function runFormTestForSite(
       }
 
       if (!rateLimited) {
-        await fillContactFields(page, identity, selectors, notes);
+        await assertNotCancelled(jobId);
+        await fillContactFields(page, identity, selectors, notes, (msg) => step(msg));
         if (/name field fill failed|email field fill failed|phone field fill failed/i.test(notes.join(' '))) {
           throw new Error('Required contact fields were not filled successfully');
         }
@@ -350,12 +375,15 @@ export async function runFormTestForSite(
             notes.push(
               `No logo field; filled "Website URL or business name" fallback with ${fallbackUrl}.`
             );
+            await step('No logo field — used website fallback');
           } else {
             notes.push('No logo field and website URL fallback could not be filled.');
           }
         } else {
+          await assertNotCancelled(jobId);
           logoUploadOk = await uploadLogoOnce(page, fileInput, logoCandidates[0]!, 1, notes)
             .catch(() => false);
+          await step(logoUploadOk ? 'Uploaded logo' : 'Logo upload failed');
         }
 
         if (logoUploadOk === false && (await fileInput.count()) > 0) {
@@ -377,7 +405,7 @@ export async function runFormTestForSite(
               `Fallback used: filled "Website URL or business name" with ${fallbackUrl} ` +
                 'so the form can still submit without a logo file. Continuing to submit.'
             );
-            await fillContactFields(page, identity, selectors, notes);
+            await fillContactFields(page, identity, selectors, notes, (msg) => step(msg));
           } else {
             notes.push(
               'Fallback failed: "Website URL or business name" field was not found or could not be filled.'
@@ -413,6 +441,8 @@ export async function runFormTestForSite(
         }
         await page.waitForTimeout(800);
 
+        await assertNotCancelled(jobId);
+        await step('Clicking submit');
         await clickQuoteSubmit(page, selectors.submit);
         submittedAt = Date.now();
 
@@ -420,6 +450,8 @@ export async function runFormTestForSite(
         layer1 = await waitForThankYou(page, layer1Timeout);
         if (!layer1) {
           notes.push('Layer 1: no thank-you screen within timeout');
+        } else {
+          await step('Thank-you screen seen');
         }
 
         screenshotPath = await captureFormScreenshot(
@@ -459,6 +491,14 @@ export async function runFormTestForSite(
       }
     }
   } catch (err) {
+    if (isJobCancelledError(err)) {
+      try {
+        await browser.close();
+      } catch {
+        /* ignore */
+      }
+      throw err;
+    }
     const msg = err instanceof Error ? err.message : String(err);
     if (selectedProxy && /net::|proxy|tunnel|connection|timeout|browser.*closed/i.test(msg)) {
       await markProxyBlocked(selectedProxy, `Fallback execution failed: ${msg}`, {
@@ -606,6 +646,7 @@ export async function runAllFormTests(opts: {
   oneSite?: boolean;
   headed?: boolean;
   siteId?: string | null;
+  jobId?: string;
 }): Promise<number> {
   const sites = (await fetchActiveSites({ oneSite: opts.oneSite, siteId: opts.siteId })).filter(
     (s) => s.form_testing_enabled
@@ -625,13 +666,30 @@ export async function runAllFormTests(opts: {
 
   for (let i = 0; i < sites.length; i++) {
     const site = sites[i]!;
+    await assertNotCancelled(opts.jobId);
     console.log(`→ Form test ${site.name}…`);
     let result: { rateLimited: boolean; ok: boolean };
     try {
-      result = await runFormTestForSite(site, opts.geo, { headed: opts.headed });
+      result = await runFormTestForSite(site, opts.geo, {
+        headed: opts.headed,
+        jobId: opts.jobId,
+      });
+      await emitJobEvent(opts.jobId, {
+        phase: 'site_done',
+        message: `${site.name} done`,
+        siteId: site.id,
+        siteName: site.name,
+      });
     } catch (err) {
+      if (isJobCancelledError(err)) throw err;
       const detail = err instanceof Error ? err.message : String(err);
       console.error(`  form monitor error: ${detail}`);
+      await emitJobEvent(opts.jobId, {
+        phase: 'error',
+        message: detail.slice(0, 300),
+        siteId: site.id,
+        siteName: site.name,
+      });
       await insertFormTest({
         site_id: site.id,
         run_id: buildRunId(),
@@ -673,6 +731,7 @@ export async function runAllFormTests(opts: {
       consecutiveRateLimits = 0;
     }
     if (i < sites.length - 1) {
+      await assertNotCancelled(opts.jobId);
       const gap = pauseMs + 10_000;
       console.log(`  pausing ${Math.round(gap / 1000)}s before next form site…`);
       await sleep(gap);

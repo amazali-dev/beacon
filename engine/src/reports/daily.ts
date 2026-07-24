@@ -6,6 +6,7 @@
 import { getEnv } from '../config.js';
 import { getSupabase } from '../db/supabase.js';
 import { sendHtmlEmail } from '../alerts/email.js';
+import { assertNotCancelled, emitJobEvent } from '../jobs/progress.js';
 
 function easternDayBounds(now = new Date(), requestedLabel?: string): { start: Date; end: Date; label: string } {
   // Approximate Eastern offset (handles EST/EDT via Intl)
@@ -86,8 +87,14 @@ function verdictFor(opts: {
   return 'HEALTHY';
 }
 
-export async function generateAndSendDailyReport(reportDate?: string): Promise<void> {
+export async function generateAndSendDailyReport(
+  reportDate?: string,
+  opts?: { jobId?: string }
+): Promise<void> {
   const sb = getSupabase();
+  const jobId = opts?.jobId;
+  await assertNotCancelled(jobId);
+  await emitJobEvent(jobId, { phase: 'step', message: 'Gathering site data' });
   const { start, end, label } = easternDayBounds(new Date(), reportDate);
   const weekAgo = new Date(start.getTime() - 7 * 24 * 60 * 60 * 1000);
 
@@ -101,6 +108,13 @@ export async function generateAndSendDailyReport(reportDate?: string): Promise<v
   const sections: string[] = [];
 
   for (const site of sites || []) {
+    await assertNotCancelled(jobId);
+    await emitJobEvent(jobId, {
+      phase: 'site_start',
+      message: `Summarizing ${site.name}`,
+      siteId: site.id,
+      siteName: site.name,
+    });
     const { data: checks } = await sb
       .from('load_checks')
       .select('profile,loaded,load_ms,lcp_ms,console_errors,checked_at,status_code,outcome')
@@ -261,7 +275,16 @@ export async function generateAndSendDailyReport(reportDate?: string): Promise<v
         <ul style="margin:0;padding-left:18px">${incidentHtml || '<li>None</li>'}</ul>
       </section>
     `);
+    await emitJobEvent(jobId, {
+      phase: 'site_done',
+      message: `${site.name} done`,
+      siteId: site.id,
+      siteName: site.name,
+    });
   }
+
+  await assertNotCancelled(jobId);
+  await emitJobEvent(jobId, { phase: 'step', message: 'Sending report email' });
 
   const html = `
     <div style="font-family:Arial,Helvetica,sans-serif;max-width:640px;margin:0 auto;padding:16px;color:#111">
@@ -275,6 +298,10 @@ export async function generateAndSendDailyReport(reportDate?: string): Promise<v
   const to = getEnv('REPORT_TO') || getEnv('ALERT_TO');
   const sent = await sendHtmlEmail(`[Beacon] Daily report ${label}`, html, to || undefined);
   console.log(sent ? `Daily report emailed to ${to}` : 'Daily report built but email was not sent (configure REPORT_TO).');
+  await emitJobEvent(jobId, {
+    phase: 'step',
+    message: sent ? 'Report emailed' : 'Report built (email not sent)',
+  });
 }
 
 function escapeHtml(s: string): string {

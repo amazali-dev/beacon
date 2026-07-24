@@ -11,6 +11,11 @@ import { blockHeavyAssets } from '../utils/bandwidth.js';
 import { withMonitorParam } from '../utils/monitor-param.js';
 import { openQuoteFormIfNeeded } from './form-fill-helpers.js';
 import type { SiteRow } from '../types.js';
+import {
+  assertNotCancelled,
+  emitJobEvent,
+  isJobCancelledError,
+} from '../jobs/progress.js';
 
 export interface DetectionReport {
   siteId: string;
@@ -211,18 +216,53 @@ export async function detectFormFieldsForSite(site: SiteRow): Promise<DetectionR
   }
 }
 
-export async function detectFormsForAllSites(opts?: { oneSite?: boolean }): Promise<void> {
+export async function detectFormsForAllSites(opts?: {
+  oneSite?: boolean;
+  jobId?: string;
+}): Promise<void> {
   const sites = await fetchActiveSites({ oneSite: opts?.oneSite });
   for (const site of sites) {
+    await assertNotCancelled(opts?.jobId);
     console.log(`\nDetecting form fields for ${site.name}…`);
+    await emitJobEvent(opts?.jobId, {
+      phase: 'site_start',
+      message: `Detecting ${site.name}`,
+      siteId: site.id,
+      siteName: site.name,
+    });
     try {
+      await emitJobEvent(opts?.jobId, {
+        phase: 'step',
+        message: 'Scanning form fields',
+        siteId: site.id,
+        siteName: site.name,
+      });
       const report = await detectFormFieldsForSite(site);
       for (const line of report.plainEnglish) {
         console.log(`  ${line}`);
       }
+      await emitJobEvent(opts?.jobId, {
+        phase: 'step',
+        message: 'Saved selectors',
+        siteId: site.id,
+        siteName: site.name,
+      });
+      await emitJobEvent(opts?.jobId, {
+        phase: 'site_done',
+        message: `${site.name} done`,
+        siteId: site.id,
+        siteName: site.name,
+      });
     } catch (err) {
+      if (isJobCancelledError(err)) throw err;
       const message = err instanceof Error ? err.message : String(err);
       console.error(`  Detection failed to run: ${message}`);
+      await emitJobEvent(opts?.jobId, {
+        phase: 'error',
+        message: message.slice(0, 300),
+        siteId: site.id,
+        siteName: site.name,
+      });
       await updateSiteSelectors(site.id, {
         form_detection_status: {
           checked_at: new Date().toISOString(),

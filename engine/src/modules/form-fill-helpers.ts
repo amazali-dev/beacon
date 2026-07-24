@@ -598,16 +598,20 @@ export async function fillContactFields(
   page: Page,
   identity: ContactIdentity,
   selectors: Record<string, string>,
-  notes: string[]
+  notes: string[],
+  onStep?: (message: string) => void | Promise<void>
 ): Promise<void> {
   const nameOk = await fillNameField(page, identity.name, selectors.name);
   if (!nameOk) notes.push('Name field fill failed');
+  else await onStep?.('Filled name');
 
   const emailOk = await fillEmailField(page, identity.email, selectors.email);
   if (!emailOk) notes.push('Email field fill failed');
+  else await onStep?.('Filled email');
 
   const phoneOk = await fillPhoneField(page, identity.phone, selectors.phone);
   if (!phoneOk) notes.push('Phone field fill failed');
+  else await onStep?.('Filled phone');
 }
 
 export async function completeSignageQuoteSteps(

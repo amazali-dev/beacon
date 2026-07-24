@@ -19,6 +19,18 @@ export type CheckJob = {
   requested_at: string;
   completed_at: string | null;
   notes: string | null;
+  cancel_requested_at?: string | null;
+};
+
+export type CheckJobEvent = {
+  id: string;
+  job_id: string;
+  seq: number;
+  site_id: string | null;
+  site_name: string | null;
+  phase: 'site_start' | 'step' | 'site_done' | 'job_done' | 'error';
+  message: string;
+  created_at: string;
 };
 
 export type OperationalAlert = {
@@ -137,9 +149,19 @@ export async function saveBeaconSettings(settings: BeaconSettings): Promise<void
 }
 
 /** Queue and dispatch through the authenticated server-side Edge Function. */
-export async function queueAndTriggerJob(jobType: JobType, siteId?: string): Promise<void> {
-  const { error } = await supabase.functions.invoke('dispatch-job', {
+export async function queueAndTriggerJob(jobType: JobType, siteId?: string): Promise<string> {
+  const { data, error } = await supabase.functions.invoke('dispatch-job', {
     body: { jobType, siteId: siteId || null },
+  });
+  if (error) throw new Error(error.message);
+  const jobId = (data as { jobId?: string } | null)?.jobId;
+  if (!jobId) throw new Error('dispatch-job did not return a jobId');
+  return jobId;
+}
+
+export async function cancelJob(jobId: string): Promise<void> {
+  const { error } = await supabase.functions.invoke('cancel-job', {
+    body: { jobId },
   });
   if (error) throw new Error(error.message);
 }
@@ -147,11 +169,34 @@ export async function queueAndTriggerJob(jobType: JobType, siteId?: string): Pro
 export async function loadRecentJobs(): Promise<CheckJob[]> {
   const { data, error } = await supabase
     .from('check_jobs')
-    .select('id,job_type,status,requested_at,completed_at,notes')
+    .select('id,job_type,status,requested_at,completed_at,notes,cancel_requested_at')
     .order('requested_at', { ascending: false })
     .limit(15);
   if (error) throw new Error(error.message);
   return (data || []) as CheckJob[];
+}
+
+export async function loadJob(jobId: string): Promise<CheckJob | null> {
+  const { data, error } = await supabase
+    .from('check_jobs')
+    .select('id,job_type,status,requested_at,completed_at,notes,cancel_requested_at')
+    .eq('id', jobId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as CheckJob | null) || null;
+}
+
+export async function loadJobEvents(jobId: string): Promise<CheckJobEvent[]> {
+  const { data, error } = await supabase
+    .from('check_job_events')
+    .select('id,job_id,seq,site_id,site_name,phase,message,created_at')
+    .eq('job_id', jobId)
+    .order('seq', { ascending: true });
+  if (error) {
+    if (/does not exist|schema cache/i.test(error.message)) return [];
+    throw new Error(error.message);
+  }
+  return (data || []) as CheckJobEvent[];
 }
 
 export async function loadOperationalAlerts(): Promise<OperationalAlert[]> {
