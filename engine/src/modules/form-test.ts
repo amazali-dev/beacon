@@ -80,6 +80,7 @@ async function ensureFormSelectors(site: SiteRow): Promise<SiteRow> {
 
 async function waitForLogoUploadState(
   page: Page,
+  notes: string[],
   timeoutMs = 30_000
 ): Promise<'success' | 'failed' | 'quiet'> {
   const started = Date.now();
@@ -108,7 +109,7 @@ async function waitForLogoUploadState(
       .catch(() => '');
     
     if (imageUrlValue && imageUrlValue.length > 0) {
-      console.log(`✓ Logo upload success: imageUrl populated with "${imageUrlValue.substring(0, 50)}..."`);
+      notes.push(`✓ Logo upload success: imageUrl populated with "${imageUrlValue.substring(0, 50)}..."`);
       return 'success';
     }
 
@@ -121,14 +122,14 @@ async function waitForLogoUploadState(
     
     if (!uploading && Date.now() - started >= 4_000) {
       // After 4 seconds with no "uploading" text, treat as quiet (success)
-      console.log(`✓ Logo upload quiet state (no feedback, but likely succeeded)`);
+      notes.push(`✓ Logo upload quiet state (no feedback, but likely succeeded)`);
       return 'quiet';
     }
     
     await page.waitForTimeout(500);
   }
   
-  console.log(`✗ Logo upload timeout - no success indicator found after ${timeoutMs}ms`);
+  notes.push(`✗ Logo upload timeout - no success indicator found after ${timeoutMs}ms`);
   return 'failed';
 }
 Update 2: Add debugging logs in uploadLogoOnce()
@@ -142,31 +143,31 @@ async function uploadLogoOnce(
   attempt: number,
   notes: string[]
 ): Promise<boolean> {
-  console.log(`[Upload Attempt ${attempt}] Starting with logo: ${logo.label}`);
-  console.log(`[Upload Attempt ${attempt}] File input count: ${await fileInput.count()}`);
-  
+  notes.push(`[Upload Attempt ${attempt}] Starting with logo: ${logo.label}`);
+  notes.push(`[Upload Attempt ${attempt}] File input count: ${await fileInput.count()}`);
+
   try {
     await fileInput.setInputFiles(logo.path);
-    console.log(`[Upload Attempt ${attempt}] File set via setInputFiles()`);
+    notes.push(`[Upload Attempt ${attempt}] File set via setInputFiles()`);
   } catch (err) {
-    console.error(`[Upload Attempt ${attempt}] Failed to set file: ${err}`);
+    notes.push(`[Upload Attempt ${attempt}] Failed to set file: ${err}`);
     notes.push(`Attempt ${attempt}: failed to set file input`);
     return false;
   }
-  
+
   notes.push(`Attempt ${attempt}: uploading logo ${logo.label}`);
-  const state = await waitForLogoUploadState(page);
-  
-  console.log(`[Upload Attempt ${attempt}] Final state: ${state}`);
-  
+  const state = await waitForLogoUploadState(page, notes);
+
+  notes.push(`[Upload Attempt ${attempt}] Final state: ${state}`);
+
   if (state === 'success' || state === 'quiet') {
     notes.push(`Attempt ${attempt}: logo upload accepted`);
-    console.log(`✓ [Upload Attempt ${attempt}] PASSED`);
+    notes.push(`✓ [Upload Attempt ${attempt}] PASSED`);
     return true;
   }
-  
+
   notes.push(`Attempt ${attempt}: logo upload reported a network failure`);
-  console.log(`✗ [Upload Attempt ${attempt}] FAILED`);
+  notes.push(`✗ [Upload Attempt ${attempt}] FAILED`);
   return false;
 }
 
@@ -179,7 +180,7 @@ async function uploadLogoOnce(
 ): Promise<boolean> {
   await fileInput.setInputFiles(logo.path);
   notes.push(`Attempt ${attempt}: uploading logo ${logo.label}`);
-  const state = await waitForLogoUploadState(page);
+  const state = await waitForLogoUploadState(page, notes);
   if (state === 'success' || state === 'quiet') {
     notes.push(`Attempt ${attempt}: logo upload accepted`);
     return true;
