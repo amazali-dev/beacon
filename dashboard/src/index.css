@@ -1845,6 +1845,18 @@ th {
   font-size: 0.82rem;
 }
 
+.site-hero-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin-left: auto;
+}
+
+.site-run-msg {
+  margin: 0.55rem 0 0;
+}
+
 .site-refresh {
   display: inline-flex;
   align-items: center;

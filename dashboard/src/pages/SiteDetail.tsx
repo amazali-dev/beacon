@@ -5,6 +5,7 @@ import { SiteCharts } from '../components/SiteCharts';
 import { Timeline } from '../components/Timeline';
 import { ScreenshotModal, ScreenshotThumb, ScreenshotEvidence, collectScreenshotPaths } from '../components/ScreenshotModal';
 import { supabase } from '../lib/supabase';
+import { queueAndTriggerJob } from '../lib/operations';
 import {
   detectionStatusLabel,
   formTestPassed,
@@ -136,6 +137,8 @@ export function SiteDetail() {
   const [expandedFormIds, setExpandedFormIds] = useState<Record<string, boolean>>({});
   const [modal, setModal] = useState<{ src: string; alt: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [runBusy, setRunBusy] = useState<'form_test' | 'load_check' | null>(null);
+  const [runMessage, setRunMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!siteId) return;
@@ -245,6 +248,25 @@ export function SiteDetail() {
     setModal({ src, alt });
   }
 
+  async function runThisSite(jobType: 'form_test' | 'load_check') {
+    if (!siteId) return;
+    setRunBusy(jobType);
+    setRunMessage(null);
+    setError(null);
+    try {
+      await queueAndTriggerJob(jobType, siteId);
+      setRunMessage(
+        jobType === 'form_test'
+          ? 'Form test queued for this site only. Watch progress on Operations.'
+          : 'Load check queued for this site only. Watch progress on Operations.'
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not start job');
+    } finally {
+      setRunBusy(null);
+    }
+  }
+
   if (error) {
     return (
       <div>
@@ -287,15 +309,36 @@ export function SiteDetail() {
               ? `Production data as of ${formatPakistanTime(dataAsOf)} ${TIME_LABEL}`
               : 'Loading current production data'}
           </span>
-          <button
-            type="button"
-            className="site-refresh"
-            onClick={() => setRefreshKey((key) => key + 1)}
-          >
-            <RefreshIcon />
-            Refresh
-          </button>
+          <div className="site-hero-actions">
+            {site.form_testing_enabled && (
+              <button
+                type="button"
+                className="site-refresh"
+                disabled={runBusy !== null}
+                onClick={() => void runThisSite('form_test')}
+              >
+                {runBusy === 'form_test' ? 'Starting…' : 'Run form test'}
+              </button>
+            )}
+            <button
+              type="button"
+              className="site-refresh"
+              disabled={runBusy !== null}
+              onClick={() => void runThisSite('load_check')}
+            >
+              {runBusy === 'load_check' ? 'Starting…' : 'Run load check'}
+            </button>
+            <button
+              type="button"
+              className="site-refresh"
+              onClick={() => setRefreshKey((key) => key + 1)}
+            >
+              <RefreshIcon />
+              Refresh
+            </button>
+          </div>
         </div>
+        {runMessage && <p className="ok-msg site-run-msg">{runMessage}</p>}
       </header>
 
       <TabBar tabs={TABS} active={tab} onChange={setTab} />

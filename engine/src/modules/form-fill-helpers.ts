@@ -493,20 +493,46 @@ export async function fillNameField(page: Page, name: string, selector?: string)
   const attempts: Array<() => Promise<boolean>> = [];
   if (selector) attempts.push(() => fillInput(page, selector, name));
   attempts.push(
-    () => tryFillLocator(page.getByLabel(/^name|your name/i).first(), name),
+    // "Full Name" / "First Name" are common on quote forms (e.g. signage.com).
     () =>
       tryFillLocator(
-        page.locator('input[name*="name" i]:not([name*="user" i]):not([type="hidden"])').first(),
+        page.getByLabel(/^(full\s+)?name|your\s+name|first\s+name/i).first(),
         name
       ),
-    () => fillInputNearLabel(page, /^(your\s+)?name\s*\*?$/i, name, { maxLabelLength: 20 })
+    () =>
+      tryFillLocator(
+        page.getByPlaceholder(/^(full\s+)?name|your\s+name|first\s+name/i).first(),
+        name
+      ),
+    () =>
+      tryFillLocator(
+        page
+          .locator(
+            [
+              'input[autocomplete="name"]',
+              'input[autocomplete="name given-name"]',
+              'input[name*="full" i][name*="name" i]',
+              'input[id*="full" i][id*="name" i]',
+              'input[placeholder*="full name" i]',
+              'input[aria-label*="full name" i]',
+              'input[name*="name" i]:not([name*="user" i]):not([name*="company" i]):not([name*="business" i]):not([type="hidden"])',
+            ].join(', ')
+          )
+          .first(),
+        name
+      ),
+    () =>
+      fillInputNearLabel(page, /^(your\s+|full\s+|first\s+)?name\s*\*?$/i, name, {
+        maxLabelLength: 24,
+      })
   );
   for (const attempt of attempts) {
     if (await attempt().catch(() => false)) {
       if (await verifyNameFilled(page, name)) return true;
     }
   }
-  return false;
+  // Same safety net as email/phone: accept if the value is actually present.
+  return verifyNameFilled(page, name);
 }
 
 export async function fillEmailField(page: Page, email: string, selector?: string): Promise<boolean> {
