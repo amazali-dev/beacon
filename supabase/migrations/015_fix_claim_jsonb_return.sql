@@ -1,38 +1,7 @@
--- Live Run-now progress events + hard cancel support
+-- Fix claim_next_check_job: must return jsonb for PostgREST (see migration 010).
+-- Migration 014 accidentally restored RETURNS public.check_jobs, which serializes
+-- as an all-null object and crashes the engine after claiming.
 
-alter table public.check_jobs
-  add column if not exists cancel_requested_at timestamptz,
-  add column if not exists github_run_id text;
-
-alter table public.check_jobs drop constraint if exists check_jobs_status_check;
-alter table public.check_jobs
-  add constraint check_jobs_status_check
-  check (status in ('pending', 'running', 'done', 'failed', 'cancelled'));
-
-create table if not exists public.check_job_events (
-  id uuid primary key default gen_random_uuid(),
-  job_id uuid not null references public.check_jobs(id) on delete cascade,
-  seq integer not null,
-  site_id uuid references public.sites(id) on delete set null,
-  site_name text,
-  phase text not null check (phase in ('site_start', 'step', 'site_done', 'job_done', 'error')),
-  message text not null,
-  created_at timestamptz not null default now(),
-  unique (job_id, seq)
-);
-
-create index if not exists check_job_events_job_seq_idx
-  on public.check_job_events (job_id, seq);
-
-alter table public.check_job_events enable row level security;
-
-drop policy if exists "Authenticated read check_job_events" on public.check_job_events;
-create policy "Authenticated read check_job_events"
-  on public.check_job_events for select to authenticated using (true);
-
--- Reclaim expired leases, but finalize cancelled jobs instead of re-queueing them.
--- Must DROP first when changing signature/return type.
--- Returns jsonb (not composite) so PostgREST/supabase-js get a stable payload.
 drop function if exists public.claim_next_check_job(text, integer);
 
 create function public.claim_next_check_job(
@@ -52,6 +21,7 @@ begin
     raise exception 'Service role required (got %)', coalesce(nullif(v_role, ''), 'none');
   end if;
 
+  -- Finalize cancelled jobs whose runner died after Stop.
   update public.check_jobs
   set status = 'cancelled',
       completed_at = coalesce(completed_at, now()),
@@ -110,11 +80,13 @@ $$;
 revoke all on function public.claim_next_check_job(text, integer) from public, anon, authenticated;
 grant execute on function public.claim_next_check_job(text, integer) to service_role;
 
--- Realtime for live Operations panel (no-op if already published)
-do $$
-begin
-  alter publication supabase_realtime add table public.check_job_events;
-exception
-  when duplicate_object then null;
-  when undefined_object then null;
-end $$;
+-- Mark jobs stuck "running" by the broken composite return so Run now can be used again.
+update public.check_jobs
+set status = 'failed',
+    completed_at = now(),
+    lease_expires_at = null,
+    runner_id = null,
+    notes = coalesce(notes || ' | ', '') || 'Failed: claim RPC returned empty payload (fixed in 015)'
+where status = 'running'
+  and cancel_requested_at is null
+  and completed_at is null;

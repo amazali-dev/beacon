@@ -136,13 +136,14 @@ export async function claimNextJob(): Promise<{
   const row = Array.isArray(data) ? data[0] : data;
   if (!row || typeof row !== 'object') return null;
   const job = row as {
-    id?: string;
-    job_type?: CheckJobType;
+    id?: string | null;
+    job_type?: CheckJobType | null;
     site_id?: string | null;
     cancel_requested_at?: string | null;
   };
+  // PostgREST composite RETURNS can serialize SQL NULL as { id: null, ... }.
   if (!job.id || !job.job_type) {
-    throw new Error(`Claimed job payload was incomplete: ${JSON.stringify(row)}`);
+    return null;
   }
 
   const githubRunId = getEnv('GITHUB_RUN_ID');
